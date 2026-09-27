@@ -27,7 +27,8 @@ Data (SQLite, PNGs, masks, the SAM model) lives in `./data`.
 | 圖庫 `/gallery` | Every image with how it was made; reuse or edit any of them |
 | 工具 `/tools` | Imported ComfyUI workflows as forms |
 | LoRA `/loras` | LoRAs ComfyUI can see, with trigger-word notes and default strengths |
-| Prompt 庫 `/presets` | System prompts for generating and for edit instructions |
+| Prompt 庫 `/presets` | System prompts for generating, edit instructions and video |
+| 監控 `/monitor` | Live VRAM / RAM / GPU / CPU, per process, last 5 minutes, and buttons to free memory |
 | 設定 `/settings` | LLM endpoint and model, GPU sharing, ComfyUI address |
 
 ## Code layout
@@ -82,6 +83,16 @@ Export a workflow from ComfyUI with *Export (API)*, paste it on 工具 → 匯�
 tick the inputs to expose, and save. Prompt fields get LLM expansion, seeds can
 randomize, LoadImage inputs pick from the gallery. Name a node `[UI] 名稱` in
 ComfyUI to have it ticked and labelled automatically.
+
+## Monitor
+
+`src/lib/server/monitor.ts` samples every 2 s while the page is open (and for
+10 minutes after): `nvidia-smi` for the GPU and per-process VRAM, `/proc` for
+RAM, swap, CPU and per-process RSS, plus ComfyUI's queue and LM Studio's loaded
+models. Processes are grouped by command line into ComfyUI, LM Studio, SAM,
+Comfy Studio and other. The page streams samples over SSE (`/api/monitor/stream`).
+Series colors were checked with the dataviz palette validator on the app's dark
+panel; status (good / high / nearly full) always pairs an icon with a label.
 
 ## GPU sharing
 

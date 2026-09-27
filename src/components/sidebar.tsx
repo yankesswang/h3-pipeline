@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Boxes, Images, Layers, ScrollText, Settings, Sparkles } from "lucide-react";
+import { Activity, Boxes, Images, Layers, ScrollText, Settings, Sparkles } from "lucide-react";
 import { useStudio } from "./studio-provider";
 
 const NAV = [
@@ -11,6 +11,7 @@ const NAV = [
   { href: "/tools", label: "工具", icon: Boxes },
   { href: "/loras", label: "LoRA", icon: Layers },
   { href: "/presets", label: "Prompt 庫", icon: ScrollText },
+  { href: "/monitor", label: "監控", icon: Activity },
   { href: "/settings", label: "設定", icon: Settings },
 ];
 
@@ -34,6 +35,16 @@ export function Sidebar() {
           >
             <Icon className="size-5" strokeWidth={1.75} />
             {label}
+            {href === "/monitor" && status?.vramPct != null && (
+              <span
+                title={`VRAM ${status.vramPct}%`}
+                className={`absolute top-1 right-1 rounded px-1 text-[9px] leading-3.5 tabular-nums ${
+                  status.vramPct >= 95 ? "bg-bad text-white" : status.vramPct >= 80 ? "bg-[#fab219] text-black" : "bg-raised text-muted"
+                }`}
+              >
+                {status.vramPct}%
+              </span>
+            )}
             {href === "/" && active > 0 && (
               <span className="absolute top-1 right-2 grid min-w-4 place-items-center rounded-full bg-accent-strong px-1 text-[10px] text-white">
                 {active}

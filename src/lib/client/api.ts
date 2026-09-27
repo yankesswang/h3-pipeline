@@ -87,7 +87,7 @@ export const api = {
   samReady: () => fetch("/api/sam").then(json<{ ready: boolean; progress: number; error?: string }>),
   sam: (imageId: string, points: [number, number, 0 | 1][]) =>
     fetch("/api/sam", send("POST", { imageId, points })).then(json<{ mask: string; score: number }>),
-  status: () => fetch("/api/status").then(json<{ comfy: boolean; llm: boolean; llmModel: string }>),
+  status: () => fetch("/api/status").then(json<{ comfy: boolean; llm: boolean; llmModel: string; vramPct: number | null }>),
 };
 
 /** Full PNG, or a cached WebP thumbnail when `width` is given. */

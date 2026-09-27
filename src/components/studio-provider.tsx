@@ -10,7 +10,7 @@ interface StudioState {
   recent: ImageRecord[];
   presets: Preset[];
   reloadPresets: () => Promise<void>;
-  status: { comfy: boolean; llm: boolean; llmModel: string } | null;
+  status: { comfy: boolean; llm: boolean; llmModel: string; vramPct: number | null } | null;
   refreshStatus: () => Promise<void>;
   /** Called by pages that change images, so the strip stays in sync. */
   patchImage: (img: ImageRecord) => void;
