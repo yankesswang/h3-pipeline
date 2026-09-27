@@ -17,6 +17,8 @@ interface ImageRow {
   file: string;
   favorite: number;
   created_at: number;
+  media: string;
+  duration: number | null;
 }
 
 function toImage(r: ImageRow): ImageRecord {
@@ -30,15 +32,25 @@ function toImage(r: ImageRow): ImageRecord {
     height: r.height,
     favorite: r.favorite === 1,
     createdAt: r.created_at,
+    media: r.media === "video" ? "video" : "image",
+    duration: r.duration ?? undefined,
   };
 }
 
-export function insertImage(img: ImageRecord, png: Buffer): ImageRecord {
-  const file = `${img.id}.png`;
-  fs.writeFileSync(path.join(IMAGE_DIR, file), png);
+/**
+ * Every record has `<id>.png`: the image itself, or a video's first frame.
+ * Videos add `<id>.mp4` and `<id>.last.png` (the last frame, for continuing).
+ */
+export function insertImage(img: ImageRecord, png: Buffer, video?: { mp4: Buffer; last: Buffer }): ImageRecord {
+  fs.writeFileSync(path.join(IMAGE_DIR, `${img.id}.png`), png);
+  const file = video ? `${img.id}.mp4` : `${img.id}.png`;
+  if (video) {
+    fs.writeFileSync(path.join(IMAGE_DIR, file), video.mp4);
+    fs.writeFileSync(path.join(IMAGE_DIR, `${img.id}.last.png`), video.last);
+  }
   db.prepare(
-    `INSERT INTO images (id, tool, params, origin, parent_id, width, height, file, favorite, created_at)
-     VALUES (@id, @tool, @params, @origin, @parent_id, @width, @height, @file, 0, @created_at)`,
+    `INSERT INTO images (id, tool, params, origin, parent_id, width, height, file, favorite, created_at, media, duration)
+     VALUES (@id, @tool, @params, @origin, @parent_id, @width, @height, @file, 0, @created_at, @media, @duration)`,
   ).run({
     id: img.id,
     tool: img.tool,
@@ -49,6 +61,8 @@ export function insertImage(img: ImageRecord, png: Buffer): ImageRecord {
     height: img.height,
     file,
     created_at: img.createdAt,
+    media: img.media,
+    duration: img.duration ?? null,
   });
   return img;
 }
@@ -75,9 +89,22 @@ export function getImage(id: string) {
   return r ? toImage(r) : undefined;
 }
 
+/** The PNG for a record: the image, or a video's first frame. */
 export function imagePath(id: string) {
+  const r = db.prepare("SELECT id FROM images WHERE id = ?").get(id) as { id: string } | undefined;
+  return r ? path.join(IMAGE_DIR, `${r.id}.png`) : undefined;
+}
+
+/** The record's main file: the PNG, or the mp4 for a video. */
+export function mediaPath(id: string) {
   const r = db.prepare("SELECT file FROM images WHERE id = ?").get(id) as { file: string } | undefined;
   return r ? path.join(IMAGE_DIR, r.file) : undefined;
+}
+
+/** A video's last frame. */
+export function lastFramePath(id: string) {
+  const p = path.join(IMAGE_DIR, `${id}.last.png`);
+  return getImage(id)?.media === "video" && fs.existsSync(p) ? p : undefined;
 }
 
 /** Every image in the same version tree as `id`: walk up to the root, then collect all descendants. */
@@ -105,14 +132,14 @@ export function setFavorite(id: string, favorite: boolean) {
 
 /** Children of a deleted image are re-attached to its parent, so trees stay connected. */
 export function deleteImage(id: string) {
-  const p = imagePath(id);
+  const files = [imagePath(id), mediaPath(id), lastFramePath(id)];
   const parent = (db.prepare("SELECT parent_id FROM images WHERE id = ?").get(id) as { parent_id: string | null } | undefined)
     ?.parent_id;
   db.transaction(() => {
     db.prepare("UPDATE images SET parent_id = ? WHERE parent_id = ?").run(parent ?? null, id);
     db.prepare("DELETE FROM images WHERE id = ?").run(id);
   })();
-  if (p) fs.rmSync(p, { force: true });
+  for (const f of new Set(files)) if (f) fs.rmSync(f, { force: true });
   for (const f of fs.readdirSync(THUMB_DIR)) if (f.startsWith(`${id}_`)) fs.rmSync(path.join(THUMB_DIR, f), { force: true });
 }
 

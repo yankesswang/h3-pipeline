@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, Download, Heart, Pencil, Repeat, Trash2 } from "lucide-react";
+import { Check, Clapperboard, Copy, Download, Heart, Pencil, Repeat, SkipForward, Trash2 } from "lucide-react";
 import { api, imageUrl } from "@/lib/client/api";
 import type { ImageRecord } from "@/lib/shared/types";
 import { Button, IconButton } from "./ui";
@@ -12,11 +12,15 @@ export function ImageInfo({
   image,
   onReuse,
   onEdit,
+  onMakeVideo,
+  onContinue,
   onDeleted,
 }: {
   image: ImageRecord;
   onReuse: (img: ImageRecord, lockSeed: boolean) => void;
   onEdit: (img: ImageRecord) => void;
+  onMakeVideo: (img: ImageRecord) => void;
+  onContinue: (video: ImageRecord) => void;
   onDeleted: (id: string) => void;
 }) {
   const { patchImage, removeImage } = useStudio();
@@ -27,6 +31,7 @@ export function ImageInfo({
   const uploaded = image.tool === "upload";
   const customTool = image.tool.startsWith("custom:") ? image.tool.slice("custom:".length) : undefined;
   const edited = image.tool === "qwen21-edit";
+  const isVideo = image.media === "video";
 
   async function toggleFavorite() {
     patchImage(await api.setFavorite(image.id, !image.favorite));
@@ -41,9 +46,20 @@ export function ImageInfo({
   return (
     <div className="flex flex-col gap-4 text-xs">
       <div className="flex flex-wrap items-center gap-1">
-        <Button variant="primary" className="!px-2.5 !py-1 text-xs" onClick={() => onEdit(image)}>
-          <Pencil className="size-3.5" /> 修改這張
-        </Button>
+        {isVideo ? (
+          <Button variant="primary" className="!px-2.5 !py-1 text-xs" onClick={() => onContinue(image)}>
+            <SkipForward className="size-3.5" /> 用最後一幀接續
+          </Button>
+        ) : (
+          <>
+            <Button variant="primary" className="!px-2.5 !py-1 text-xs" onClick={() => onEdit(image)}>
+              <Pencil className="size-3.5" /> 修改這張
+            </Button>
+            <Button variant="outline" className="!px-2.5 !py-1 text-xs" onClick={() => onMakeVideo(image)}>
+              <Clapperboard className="size-3.5" /> 做成影片
+            </Button>
+          </>
+        )}
         {customTool && (
           <a href={`/tools/${customTool}?reuse=${image.id}`}>
             <Button variant="outline" className="!px-2.5 !py-1 text-xs">
@@ -82,7 +98,7 @@ export function ImageInfo({
       ) : (
         <>
       <Section
-        title={p.outpaint ? "擴圖" : p.maskId ? "局部修改指令" : edited ? "修改指令" : "Prompt"}
+        title={isVideo ? "影片 prompt" : p.outpaint ? "擴圖" : p.maskId ? "局部修改指令" : edited ? "修改指令" : "Prompt"}
         action={
           <button
             className="flex items-center gap-1 text-faint hover:text-fg"
@@ -128,6 +144,15 @@ export function ImageInfo({
           <Dd>
             {image.width}×{image.height}
           </Dd>
+          {isVideo && (
+            <>
+              <Dt>長度</Dt>
+              <Dd>
+                {image.duration?.toFixed(1)} 秒 · {p.video?.firstFrameId ? "圖片生成" : "文字生成"}
+                {p.video?.lastFrameId ? "（有結尾幀）" : ""}
+              </Dd>
+            </>
+          )}
           <Dt>Steps / CFG</Dt>
           <Dd>
             {p.steps} / {p.cfg}

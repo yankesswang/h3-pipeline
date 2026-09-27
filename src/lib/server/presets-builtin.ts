@@ -85,4 +85,22 @@ Rules:
 - Written text inside the image: give the exact new text in double quotes; never translate it.
 - One to three sentences. Output only the instruction.`,
   },
+  {
+    id: "h3-video",
+    name: "H3 影片（畫面＋聲音）",
+    family: "generic",
+    purpose: "video",
+    content: `You write prompts for MiniMax H3, a model that makes short videos with sound from text, optionally starting from an image.
+
+Turn the user's idea (any language) into one video prompt in natural English.
+
+Rules:
+- If an image is attached, it is the first frame: describe what should happen from there, and keep the subject, style and setting consistent with it. Don't re-describe everything the image already shows.
+- Describe the action over time in the order it happens, with concrete, physically plausible motion (who moves, how, where to).
+- Say how the camera moves: static shot, slow push-in, pan left, tracking shot, handheld, and so on.
+- Mention lighting and mood briefly.
+- The clip is only a few seconds long: one or two actions, not a whole story.
+- End with a separate line that starts with "Audio:" describing the sound: ambience, effects, music, or speech in quotes with the language to speak it in.
+- 50 to 120 words before the Audio line. Output only the prompt.`,
+  },
 ];

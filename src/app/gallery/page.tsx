@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, Heart, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Heart, Play, Search, X } from "lucide-react";
 import { api, imageUrl } from "@/lib/client/api";
 import type { ImageRecord } from "@/lib/shared/types";
 import { ImageInfo } from "@/components/image-info";
@@ -109,6 +109,11 @@ export default function GalleryPage() {
                 <p className="line-clamp-2">{img.params.prompt}</p>
               </div>
               {img.favorite && <Heart className="absolute top-2 right-2 size-4 fill-bad text-bad drop-shadow" />}
+              {img.media === "video" && (
+                <span className="absolute top-2 left-2 flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-[11px]">
+                  <Play className="size-3 fill-white" /> {img.duration?.toFixed(1)}s
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -118,8 +123,13 @@ export default function GalleryPage() {
       {open && (
         <div className="fixed inset-0 z-50 flex bg-black/85 backdrop-blur-sm" onClick={() => setOpenIdx(null)}>
           <div className="relative flex min-w-0 flex-1 items-center justify-center p-8" onClick={(e) => e.stopPropagation()}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={imageUrl(open.id)} alt={open.params.prompt} className="checker max-h-full max-w-full rounded-lg object-contain" />
+            { }
+            {open.media === "video" ? (
+              <video key={open.id} src={imageUrl(open.id)} controls autoPlay loop playsInline className="max-h-full max-w-full rounded-lg bg-black" />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={imageUrl(open.id)} alt={open.params.prompt} className="checker max-h-full max-w-full rounded-lg object-contain" />
+            )}
             <IconButton label="上一張" className="absolute left-3 bg-black/40" onClick={() => setOpenIdx(Math.max(0, openIdx! - 1))} disabled={openIdx === 0}>
               <ChevronLeft className="size-5" />
             </IconButton>
@@ -142,6 +152,8 @@ export default function GalleryPage() {
               image={open}
               onReuse={(img, lockSeed) => router.push(`/?reuse=${img.id}${lockSeed ? "&seed=1" : ""}`)}
               onEdit={(img) => router.push(`/?edit=${img.id}`)}
+              onMakeVideo={(img) => router.push(`/?video=${img.id}`)}
+              onContinue={(v) => router.push(`/?continue=${v.id}`)}
               onDeleted={(id) => {
                 setImages((cur) => cur.filter((c) => c.id !== id));
                 setOpenIdx((i) => (i !== null && i >= shown.length - 1 ? shown.length - 2 : i));

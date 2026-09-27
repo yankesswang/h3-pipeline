@@ -9,12 +9,13 @@ export const FAMILY_LABELS: Record<ModelFamily, string> = {
   generic: "通用",
 };
 
-/** What a preset writes: prompts for new images, or instructions for editing one. */
-export type PresetPurpose = "generate" | "edit";
+/** What a preset writes: prompts for new images, instructions for editing one, or video prompts. */
+export type PresetPurpose = "generate" | "edit" | "video";
 
 export const PURPOSE_LABELS: Record<PresetPurpose, string> = {
   generate: "生成新圖",
   edit: "修圖指令",
+  video: "影片",
 };
 
 export interface Preset {
@@ -47,6 +48,18 @@ export interface GenerateParams {
   loras?: LoraUse[];
   /** Imported-workflow tools: every field's value, keyed by field key. Image fields hold image ids. */
   toolValues?: Record<string, unknown>;
+  /** Video generation settings. */
+  video?: VideoParams;
+}
+
+export interface VideoParams {
+  seconds: number;
+  /** Pixel budget: 0.4 is fast, 0.98 is the official 768p. */
+  megapixels: number;
+  /** Image to video: the first frame (an image id). Absent = text to video at width × height. */
+  firstFrameId?: string;
+  /** Optional end frame the video moves towards. */
+  lastFrameId?: string;
 }
 
 export interface LoraUse {
@@ -54,7 +67,7 @@ export interface LoraUse {
   strength: number;
 }
 
-export type BuiltinToolId = "qwen21-t2i" | "qwen21-edit";
+export type BuiltinToolId = "qwen21-t2i" | "qwen21-edit" | "minimax-h3-video";
 /** Built-in tools, or `custom:<id>` for an imported workflow. */
 export type ToolId = BuiltinToolId | `custom:${string}`;
 
@@ -135,8 +148,14 @@ export interface Job {
   createdAt: number;
 }
 
+export type MediaKind = "image" | "video";
+
 export interface ImageRecord {
   id: string;
+  /** Videos keep a poster (first frame) and last frame as PNGs next to the mp4. */
+  media: MediaKind;
+  /** Seconds, for videos. */
+  duration?: number;
   /** A ToolId, or "upload" for images brought in from outside. */
   tool: ToolId | "upload";
   params: GenerateParams;

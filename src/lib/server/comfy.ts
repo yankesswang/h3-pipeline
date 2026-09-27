@@ -105,6 +105,12 @@ class ComfyClient {
     return Buffer.from(await res.arrayBuffer());
   }
 
+  /** Whether ComfyUI's queue (running or pending) holds this prompt. */
+  async inQueue(promptId: string): Promise<boolean> {
+    const q = await this.req<{ queue_running: unknown[][]; queue_pending: unknown[][] }>("/queue");
+    return [...q.queue_running, ...q.queue_pending].some((item) => item[1] === promptId);
+  }
+
   async interrupt(promptId: string) {
     await this.req("/interrupt", { method: "POST", body: JSON.stringify({ prompt_id: promptId }) });
   }

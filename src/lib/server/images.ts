@@ -27,6 +27,7 @@ export async function importUpload(data: Buffer, name?: string): Promise<ImageRe
     {
       id: nanoid(12),
       tool: "upload",
+      media: "image",
       params: { prompt: name ? `上傳：${name}` : "上傳的圖片", negativePrompt: "", width, height, steps: 0, cfg: 0, seed: 0 },
       width,
       height,

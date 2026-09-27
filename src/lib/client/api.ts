@@ -43,6 +43,9 @@ export const api = {
     return fetch(`/api/images?${sp}`).then(json<ImageRecord[]>);
   },
   image: (id: string) => fetch(`/api/images/${id}`).then(json<ImageRecord>),
+  /** A video's first or last frame as an image of its own. */
+  frame: (id: string, which: "first" | "last") =>
+    fetch(`/api/images/${id}/frame`, send("POST", { which })).then(json<ImageRecord>),
   tree: (id: string) => fetch(`/api/images/${id}/tree`).then(json<ImageRecord[]>),
   upload: (files: File[]) => {
     const form = new FormData();

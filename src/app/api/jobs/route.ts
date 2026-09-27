@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   // Outpainting has a built-in instruction, so its prompt may be empty.
   if (!p?.prompt?.trim() && !p?.outpaint) return Response.json({ error: "prompt 不能是空的" }, { status: 400 });
   const count = Math.min(Math.max(1, body.count || 1), 8);
-  const tool = body.tool ?? (p.sourceImageId ? "qwen21-edit" : "qwen21-t2i");
+  const tool = body.tool ?? (p.video ? "minimax-h3-video" : p.sourceImageId ? "qwen21-edit" : "qwen21-t2i");
   try {
     if (body.mask) p.maskId = saveMask(body.mask);
     // Several at once: bump every seed so each result differs.

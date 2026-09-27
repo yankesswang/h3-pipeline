@@ -1,13 +1,14 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Dices, ImagePlus, Lock, Loader2, Plus, SlidersHorizontal, Square, Undo2, Upload, Wand2, X } from "lucide-react";
+import { Clapperboard, Dices, Image as ImageIcon, ImagePlus, Lock, Loader2, Plus, SlidersHorizontal, Square, Undo2, Upload, Wand2, X } from "lucide-react";
 import { imageUrl, streamLlm } from "@/lib/client/api";
 import { ASPECTS, MEGAPIXELS, QUALITIES, randomSeed, sizeFor } from "@/lib/shared/sizes";
 import type { ImageRecord } from "@/lib/shared/types";
 import { Button, Chip, IconButton, PresetSelect, inputCls } from "@/components/ui";
 import { useStudio } from "@/components/studio-provider";
-import { addRefs, editImageIds, MAX_REFS, purposeOf, type ComposerState } from "./composer-state";
+import { addRefs, editImageIds, MAX_REFS, purposeOf, setMode, videoDims, type ComposerState } from "./composer-state";
+import { framesFor } from "@/lib/tools/video";
 import { LoraPicker } from "./lora-picker";
 
 export function Composer({
@@ -39,13 +40,17 @@ export function Composer({
   const textRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const set = (patch: Partial<ComposerState>) => setState((s) => ({ ...s, ...patch }));
-  const editing = !!state.edit;
+  const video = state.mode === "video";
+  const editing = !video && !!state.edit;
   const o = state.edit?.outpaint;
-  const { width, height } = editing
-    ? { width: state.edit!.source.width + (o ? o.left + o.right : 0), height: state.edit!.source.height + (o ? o.top + o.bottom : 0) }
-    : sizeFor(state.aspect, state.megapixels);
+  const { width, height } = video
+    ? videoDims(state)
+    : editing
+      ? { width: state.edit!.source.width + (o ? o.left + o.right : 0), height: state.edit!.source.height + (o ? o.top + o.bottom : 0) }
+      : sizeFor(state.aspect, state.megapixels);
   const outpainting = editing && region === "outpaint";
   const canRun = !!state.prompt.trim() || (outpainting && !!o && o.left + o.top + o.right + o.bottom > 0);
+  const frames = framesFor(state.video.seconds);
   const purpose = purposeOf(state);
   const preset = presets.find((p) => p.id === presetId);
 
@@ -117,7 +122,15 @@ export function Composer({
         }}
       />
 
-      {state.edit && (
+      {video && (
+        <VideoFrames
+          state={state}
+          setState={setState}
+          onUploadClick={() => fileRef.current?.click()}
+        />
+      )}
+
+      {editing && (
         <EditTargets
           state={state}
           onInsert={insertToken}
@@ -151,9 +164,13 @@ export function Composer({
             onGenerate();
           }
         }}
-        rows={editing ? 3 : 4}
+        rows={editing || video ? 3 : 4}
         placeholder={
-          outpainting
+          video
+            ? state.video.first
+              ? "從第一幀開始，接下來發生什麼？鏡頭怎麼動？最後一行可以寫「Audio: …」描述聲音。按「擴寫」讓 LLM 看圖寫好。"
+              : "描述影片：誰在做什麼、鏡頭怎麼動。最後一行可以寫「Audio: …」描述聲音，H3 會一起生成。（Ctrl+Enter 生成）"
+            : outpainting
             ? "（選填）描述延伸出去的部分要有什麼，例如「左邊多一棵櫻花樹」。留空就讓模型自然延伸。"
             : region === "mask"
               ? "選取範圍要改成什麼？例如「換成一隻橘貓」「移除這個人」。（Ctrl+Enter 送出）"
@@ -167,6 +184,24 @@ export function Composer({
       {error && <p className="mt-1 px-1 text-xs text-bad">{error}</p>}
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="flex items-center rounded-lg bg-raised p-0.5" role="tablist">
+          {(
+            [
+              ["image", "圖片", ImageIcon],
+              ["video", "影片", Clapperboard],
+            ] as const
+          ).map(([m, label, Icon]) => (
+            <button
+              key={m}
+              onClick={() => setState((s) => setMode(s, m))}
+              className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs transition ${
+                state.mode === m ? "bg-accent-strong text-white" : "text-muted hover:text-fg"
+              }`}
+            >
+              <Icon className="size-3.5" /> {label}
+            </button>
+          ))}
+        </div>
         <div className="flex items-center gap-1 rounded-lg bg-raised p-0.5">
           {expanding ? (
             <Button variant="ghost" className="!py-1" onClick={() => abortRef.current?.abort()}>
@@ -194,7 +229,46 @@ export function Composer({
 
         <div className="mx-1 h-5 w-px bg-line" />
 
-        {editing ? (
+        {video ? (
+          <>
+            {!state.video.first && (
+              <div className="flex items-center">
+                {ASPECTS.map((a) => (
+                  <Chip key={a.id} on={state.aspect === a.id} onClick={() => set({ aspect: a.id })}>
+                    {a.id}
+                  </Chip>
+                ))}
+              </div>
+            )}
+            <label className="flex items-center gap-2 text-xs text-muted" title={`${frames} 幀 @ 24fps`}>
+              長度
+              <input
+                type="range"
+                min={1}
+                max={10}
+                step={0.5}
+                value={state.video.seconds}
+                onChange={(e) => setState((s) => ({ ...s, video: { ...s.video, seconds: Number(e.target.value) } }))}
+                className="w-24 accent-accent-strong"
+              />
+              <span className="w-12 text-fg tabular-nums">{(frames / 24).toFixed(1)} 秒</span>
+            </label>
+            <div className="flex items-center">
+              {[
+                { mp: 0.4, label: "快速" },
+                { mp: 0.98, label: "768p" },
+              ].map((q) => (
+                <Chip
+                  key={q.mp}
+                  on={state.video.megapixels === q.mp}
+                  onClick={() => setState((s) => ({ ...s, video: { ...s.video, megapixels: q.mp } }))}
+                >
+                  {q.label}
+                </Chip>
+              ))}
+            </div>
+          </>
+        ) : editing ? (
           <span className={`rounded-md px-2 py-1 text-xs ${region === "whole" ? "text-faint" : "bg-accent-strong/20 text-accent"}`}>
             {region === "mask" ? "只改選取範圍" : region === "outpaint" ? "擴圖" : "整張修改 · 尺寸跟原圖一樣"}
           </span>
@@ -217,23 +291,25 @@ export function Composer({
           </>
         )}
 
-        <div className="flex items-center">
-          {QUALITIES.map((q) => (
-            <Chip key={q.id} on={state.steps === q.steps} onClick={() => set({ steps: q.steps })}>
-              {q.label}
-            </Chip>
-          ))}
-        </div>
+        {!video && (
+          <div className="flex items-center">
+            {QUALITIES.map((q) => (
+              <Chip key={q.id} on={state.steps === q.steps} onClick={() => set({ steps: q.steps })}>
+                {q.label}
+              </Chip>
+            ))}
+          </div>
+        )}
 
         <IconButton label="進階參數與 LoRA" onClick={() => setAdvanced((v) => !v)} className={advanced ? "text-accent" : ""}>
           <SlidersHorizontal className="size-4" />
         </IconButton>
-        {state.loras.length > 0 && !advanced && (
+        {state.loras.length > 0 && !advanced && !video && (
           <button onClick={() => setAdvanced(true)} className="rounded-md bg-accent-strong/20 px-2 py-1 text-xs text-accent">
             LoRA ×{state.loras.length}
           </button>
         )}
-        {!editing && (
+ {!editing && !video && (
           <IconButton label="上傳圖片來修改" onClick={() => fileRef.current?.click()}>
             <ImagePlus className="size-4" />
           </IconButton>
@@ -242,7 +318,7 @@ export function Composer({
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs text-faint tabular-nums">
             {width}×{height}
-            {!quality && ` · ${state.steps} steps`}
+            {video ? ` · 約 ${Math.max(1, Math.round((frames / 73) * (state.video.megapixels > 0.5 ? 2.5 : 1) * 50 / 10) * 10)} 秒` : !quality && ` · ${state.steps} steps`}
           </span>
           <div className="flex items-center rounded-lg border border-line text-xs">
             <button className="px-2 py-1 text-muted hover:text-fg" onClick={() => set({ count: Math.max(1, state.count - 1) })}>
@@ -257,13 +333,15 @@ export function Composer({
           </div>
           <Button variant="primary" onClick={onGenerate} disabled={!canRun || expanding} className="px-5">
             {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-            {outpainting ? "擴圖" : editing ? "修改" : "生成"}
+            {video ? "生成影片" : outpainting ? "擴圖" : editing ? "修改" : "生成"}
           </Button>
         </div>
       </div>
 
       {advanced && (
         <div className="mt-3 grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-muted">
+          {!video && (
+            <>
           <label>Steps</label>
           <div className="flex items-center gap-3">
             <input
@@ -291,6 +369,8 @@ export function Composer({
             <span className="tabular-nums text-fg">{state.cfg}</span>
             <span className="text-faint">保持 1；要用負面 prompt 才調高（會變慢一倍）</span>
           </div>
+            </>
+          )}
           <label>Seed</label>
           <div className="flex items-center gap-2">
             <input
@@ -311,15 +391,19 @@ export function Composer({
               {state.seedLocked ? "固定 seed" : "每次隨機"}
             </Button>
           </div>
-          <label>LoRA</label>
-          <LoraPicker value={state.loras} onChange={(loras) => set({ loras })} />
-          <label>負面 prompt</label>
-          <input
-            value={state.negativePrompt}
-            onChange={(e) => set({ negativePrompt: e.target.value })}
-            placeholder={state.cfg <= 1 ? "CFG = 1 時不會生效" : "不想出現的東西"}
-            className={`${inputCls} !py-1`}
-          />
+          {!video && (
+            <>
+              <label>LoRA</label>
+              <LoraPicker value={state.loras} onChange={(loras) => set({ loras })} />
+              <label>負面 prompt</label>
+              <input
+                value={state.negativePrompt}
+                onChange={(e) => set({ negativePrompt: e.target.value })}
+                placeholder={state.cfg <= 1 ? "CFG = 1 時不會生效" : "不想出現的東西"}
+                className={`${inputCls} !py-1`}
+              />
+            </>
+          )}
         </div>
       )}
     </div>
@@ -438,6 +522,107 @@ function Thumb({
         >
           <X className="size-3" />
         </button>
+      )}
+    </div>
+  );
+}
+
+/** Image to video: an optional first frame (and an end frame to move towards). Empty = text to video. */
+function VideoFrames({
+  state,
+  setState,
+  onUploadClick,
+}: {
+  state: ComposerState;
+  setState: (fn: (s: ComposerState) => ComposerState) => void;
+  onUploadClick: () => void;
+}) {
+  const { recent } = useStudio();
+  const [picking, setPicking] = useState<"first" | "last" | null>(null);
+  const v = state.video;
+  const setFrame = (which: "first" | "last", img?: ImageRecord) =>
+    setState((s) => ({
+      ...s,
+      video: which === "first" ? { ...s.video, first: img, last: img ? s.video.last : undefined } : { ...s.video, last: img },
+    }));
+
+  const slot = (which: "first" | "last", img?: ImageRecord) => (
+    <div className="group relative">
+      {img ? (
+        <>
+          <button
+            onClick={() => setPicking(picking === which ? null : which)}
+            className="relative block h-14 overflow-hidden rounded-lg border border-accent"
+            style={{ aspectRatio: img.width / img.height }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={imageUrl(img.id, 160)} alt="" className="h-full w-full object-cover" />
+            <span className="absolute inset-x-0 bottom-0 bg-black/70 px-1 text-center text-[10px] leading-4">
+              {which === "first" ? "第一幀" : "結尾幀"}
+            </span>
+          </button>
+          <button
+            onClick={() => setFrame(which)}
+            title="移除"
+            className="absolute -top-1.5 -right-1.5 hidden size-4 place-items-center rounded-full bg-bad text-white group-hover:grid"
+          >
+            <X className="size-3" />
+          </button>
+        </>
+      ) : (
+        <button
+          onClick={() => setPicking(picking === which ? null : which)}
+          className={`flex h-14 items-center gap-1 rounded-lg border border-dashed px-3 text-xs transition ${
+            picking === which ? "border-accent text-accent" : "border-line text-muted hover:border-muted hover:text-fg"
+          }`}
+        >
+          <Plus className="size-3.5" /> {which === "first" ? "第一幀（選填）" : "結尾幀（選填）"}
+        </button>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="relative mb-3 flex items-center gap-2 border-b border-line pb-3">
+      <span className="mr-1 text-xs font-medium text-accent">{v.first ? "圖片生成影片" : "文字生成影片"}</span>
+      {slot("first", v.first)}
+      {v.first && slot("last", v.last)}
+      <span className="ml-2 hidden text-xs text-faint xl:inline">
+        {v.first ? "影片從第一幀開始，比例跟著它" : "沒有第一幀時，照下方選的比例從文字生成"}
+      </span>
+
+      {picking && (
+        <div className="absolute bottom-full left-0 z-20 mb-2 w-[520px] rounded-xl border border-line bg-raised p-3 shadow-2xl shadow-black/60">
+          <div className="mb-2 flex items-center justify-between text-xs">
+            <span className="text-muted">選{picking === "first" ? "第一幀" : "結尾幀"}</span>
+            <div className="flex gap-1">
+              <Button variant="outline" className="!px-2 !py-1 text-xs" onClick={onUploadClick}>
+                <Upload className="size-3.5" /> 上傳
+              </Button>
+              <IconButton label="關閉" onClick={() => setPicking(null)}>
+                <X className="size-4" />
+              </IconButton>
+            </div>
+          </div>
+          <div className="grid max-h-64 grid-cols-6 gap-1.5 overflow-y-auto">
+            {recent
+              .filter((r) => r.media === "image")
+              .map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => {
+                    setFrame(picking, r);
+                    setPicking(null);
+                  }}
+                  className="aspect-square overflow-hidden rounded-md border border-line hover:border-accent"
+                  title={r.params.prompt}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={imageUrl(r.id, 160)} alt="" className="h-full w-full object-cover" />
+                </button>
+              ))}
+          </div>
+        </div>
       )}
     </div>
   );

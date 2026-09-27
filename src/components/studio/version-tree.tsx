@@ -33,7 +33,8 @@ export function lineage(tree: ImageRecord[], id: string): ImageRecord[] {
 
 export function stepLabel(img: ImageRecord) {
   const p = img.params;
-  if (img.tool === "upload") return "上傳的原圖";
+  if (img.media === "video") return `影片：${p.prompt}`;
+  if (img.tool === "upload") return img.parentId ? p.prompt : "上傳的原圖";
   if (img.tool === "qwen21-t2i") return "生成";
   if (p.outpaint) return p.prompt ? `擴圖：${p.prompt}` : `擴圖到 ${img.width}×${img.height}`;
   if (p.maskId) return `局部：${p.prompt}`;

@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import fs from "node:fs";
 import type { GenerateParams, Job, PromptOrigin, ServerEvent, ToolId } from "@/lib/shared/types";
 import { buildPrompt, type ApiWorkflow, type Tool } from "@/lib/tools/types";
+import { buildVideoWorkflow, framesFor, VIDEO_OUTPUT } from "@/lib/tools/video";
 import { comfy, type ComfyMessage } from "./comfy";
 import { afterGenerate, beforeGenerate } from "./gpu";
 import { pngSize } from "./images";
@@ -31,6 +32,13 @@ const STAGES: Record<string, string> = {
   KSampler: "生成中",
   VAEDecode: "解碼",
   SaveImage: "儲存",
+  UNETLoader: "載入影片模型",
+  ImageScaleToTotalPixels: "準備首幀",
+  MiniMaxH3ImageToVideo: "理解 prompt",
+  VAEDecodeAudio: "產生聲音",
+  CreateVideo: "合成影片",
+  SaveVideo: "儲存影片",
+  ImageFromBatch: "擷取影格",
 };
 
 interface QueueState {
@@ -67,6 +75,12 @@ export function listJobs() {
 
 export function enqueue(toolId: ToolId, params: GenerateParams, origin?: PromptOrigin): Job {
   resolveTool(toolId); // throws for unknown or deleted tools
+  if (toolId === "minimax-h3-video") {
+    const v = params.video;
+    if (!v) throw new Error("缺少影片設定");
+    for (const id of [v.firstFrameId, v.lastFrameId]) if (id && !getImage(id)) throw new Error(`找不到圖片 ${id}`);
+    if (v.lastFrameId && !v.firstFrameId) throw new Error("要有第一幀才能指定最後一幀");
+  }
   for (const f of customFields(toolId))
     if (f.kind === "image") {
       const id = params.toolValues?.[f.key];
@@ -129,7 +143,9 @@ async function run(job: Job) {
     tool = resolveTool(job.tool);
     await beforeGenerate();
     let prompt;
-    if (job.tool.startsWith("custom:")) {
+    if (job.tool === "minimax-h3-video") {
+      prompt = await videoWorkflow(job.params);
+    } else if (job.tool.startsWith("custom:")) {
       prompt = buildPrompt(tool, await customValues(job), [], job.params.loras);
     } else {
       const region = await prepareRegion(job.params);
@@ -156,6 +172,28 @@ async function run(job: Job) {
     finishers.delete(job);
     afterGenerate();
   }
+}
+
+async function videoWorkflow(p: GenerateParams) {
+  const v = p.video;
+  if (!v) throw new Error("缺少影片設定");
+  const upload = (id?: string) => {
+    if (!id) return undefined;
+    const file = imagePath(id);
+    if (!file) throw new Error(`找不到圖片 ${id}`);
+    return comfy.upload(fs.readFileSync(file), `${id}.png`);
+  };
+  const [firstFrame, lastFrame] = await Promise.all([upload(v.firstFrameId), upload(v.lastFrameId)]);
+  return buildVideoWorkflow({
+    prompt: p.prompt,
+    seed: p.seed,
+    seconds: v.seconds,
+    megapixels: v.megapixels,
+    width: p.width,
+    height: p.height,
+    firstFrame,
+    lastFrame,
+  });
 }
 
 /** An imported tool's values, with image fields turned into uploaded file names. */
@@ -246,9 +284,17 @@ function waitFor(job: Job, promptId: string, workflow: ApiWorkflow): Promise<"su
       }
     };
     comfy.events.on(promptId, onMsg);
+    let missing = 0;
     const poll = setInterval(async () => {
       const h = await comfy.history(promptId).catch(() => undefined);
-      if (!h?.status?.completed && h?.status?.status_str !== "error") return;
+      if (!h) {
+        // Not finished; make sure ComfyUI still has it. A restart drops its queue.
+        const known = await comfy.inQueue(promptId).catch(() => true);
+        missing = known ? 0 : missing + 1;
+        if (missing >= 2) finish(() => reject(new Error("ComfyUI 重新啟動了，這個任務遺失，請再送一次")));
+        return;
+      }
+      if (!h.status?.completed && h.status?.status_str !== "error") return;
       if (h.status.status_str === "error") {
         const interrupted = h.status.messages?.some(([t]) => t === "execution_interrupted");
         finish(() => (interrupted ? resolve("interrupted") : reject(new Error("ComfyUI 執行失敗"))));
@@ -259,6 +305,34 @@ function waitFor(job: Job, promptId: string, workflow: ApiWorkflow): Promise<"su
 
 async function collect(job: Job, tool: Tool, promptId: string, finish?: (out: Buffer) => Promise<Buffer>) {
   const h = await comfy.history(promptId);
+  if (job.tool === "minimax-h3-video") {
+    const get = async (node: string) => {
+      const ref = h?.outputs?.[node]?.images?.[0];
+      if (!ref) throw new Error("ComfyUI 沒有回傳影片");
+      return comfy.fetchImage(ref);
+    };
+    const [mp4, first, last] = await Promise.all([get(VIDEO_OUTPUT.video), get(VIDEO_OUTPUT.first), get(VIDEO_OUTPUT.last)]);
+    const { width, height } = pngSize(first);
+    const video = insertImage(
+      {
+        id: nanoid(12),
+        tool: job.tool,
+        media: "video",
+        duration: framesFor(job.params.video!.seconds) / 24,
+        params: { ...job.params, width, height },
+        origin: job.origin,
+        parentId: job.params.video?.firstFrameId,
+        width,
+        height,
+        favorite: false,
+        createdAt: Date.now(),
+      },
+      first,
+      { mp4, last },
+    );
+    emit({ type: "image", image: video });
+    return video;
+  }
   const ref = h?.outputs?.[tool.outputNode]?.images?.[0];
   if (!ref) throw new Error("ComfyUI 沒有回傳圖片");
   let png = await comfy.fetchImage(ref);
@@ -271,6 +345,7 @@ async function collect(job: Job, tool: Tool, promptId: string, finish?: (out: Bu
     {
       id: nanoid(12),
       tool: job.tool,
+      media: "image",
       params: job.params,
       origin: job.origin,
       parentId: job.params.sourceImageId,

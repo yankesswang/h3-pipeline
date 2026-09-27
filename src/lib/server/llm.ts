@@ -128,7 +128,12 @@ export function streamChat(messages: LlmMessage[], signal?: AbortSignal): Readab
             if (!(await freeComfyForLlm()))
               throw new Error("LLM 載不進 GPU，而且目前正在生圖，無法釋放 VRAM。請等生圖結束再試。");
             out({ t: "reasoning", d: "（已請 ComfyUI 釋放 VRAM，重新載入 LLM…）\n" });
-            res = await call();
+            // Freeing takes a moment and LM Studio's loader can fail while it does; back off and retry.
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              await new Promise((r) => setTimeout(r, attempt * 2000));
+              res = await call();
+              if (res.ok || !/failed to load model/i.test(await res.clone().text())) break;
+            }
           } else throw new Error(`LLM 回應 ${res.status}：${text.slice(0, 400)}`);
         }
         if (!res.ok || !res.body) throw new Error(`LLM 回應 ${res.status}：${(await res.text()).slice(0, 400)}`);

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { AlertTriangle, ImageIcon, Info, Loader2, Pencil, X } from "lucide-react";
+import { AlertTriangle, Clapperboard, ImageIcon, Info, Loader2, Pencil, SkipForward, X } from "lucide-react";
 import { api, imageUrl } from "@/lib/client/api";
 import type { ImageRecord, Job } from "@/lib/shared/types";
 
@@ -16,6 +16,8 @@ export function Viewer({
   onToggleInfo,
   editing,
   onEdit,
+  onMakeVideo,
+  onContinue,
   stage,
 }: {
   image?: ImageRecord;
@@ -26,6 +28,10 @@ export function Viewer({
   /** This image is the current edit target. */
   editing: boolean;
   onEdit: (img: ImageRecord) => void;
+  /** Image → video, starting from this image. */
+  onMakeVideo: (img: ImageRecord) => void;
+  /** Video → next clip, starting from its last frame. */
+  onContinue: (video: ImageRecord) => void;
   /** Replaces the plain image while it is being edited (selection tools, outpaint frame). */
   stage?: ReactNode;
 }) {
@@ -44,17 +50,41 @@ export function Viewer({
 
   return (
     <div className="group relative flex h-full items-center justify-center">
-      {stage ?? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          key={image.id}
-          src={imageUrl(image.id)}
-          alt={image.params.prompt}
-          className="checker max-h-full max-w-full rounded-lg object-contain shadow-2xl shadow-black/50"
-        />
-      )}
-      <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-xl bg-black/60 p-1 backdrop-blur">
-        {editing ? (
+      {stage ??
+        (image.media === "video" ? (
+          <video
+            key={image.id}
+            src={imageUrl(image.id)}
+            poster={imageUrl(image.id, 640)}
+            controls
+            autoPlay
+            loop
+            playsInline
+            className="max-h-full max-w-full rounded-lg bg-black shadow-2xl shadow-black/50"
+          />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={image.id}
+            src={imageUrl(image.id)}
+            alt={image.params.prompt}
+            className="checker max-h-full max-w-full rounded-lg object-contain shadow-2xl shadow-black/50"
+          />
+        ))}
+      <div
+        className={`absolute left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-xl bg-black/60 p-1 backdrop-blur ${
+          image.media === "video" && !stage ? "top-3" : "bottom-3"
+        }`}
+      >
+        {image.media === "video" ? (
+          <button
+            onClick={() => onContinue(image)}
+            className="flex items-center gap-1.5 rounded-lg bg-accent-strong px-3 py-1.5 text-xs font-medium text-white hover:bg-accent"
+            title="用這支影片的最後一幀當下一段的第一幀"
+          >
+            <SkipForward className="size-3.5" /> 用最後一幀接續
+          </button>
+        ) : editing ? (
           <span className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-accent">
             <Pencil className="size-3.5" /> 正在修改這張
           </span>
@@ -65,6 +95,15 @@ export function Viewer({
             title="修改這張（E）"
           >
             <Pencil className="size-3.5" /> 修改這張
+          </button>
+        )}
+        {image.media === "image" && (
+          <button
+            onClick={() => onMakeVideo(image)}
+            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-fg hover:bg-white/10"
+            title="讓這張圖動起來（圖片生成影片）"
+          >
+            <Clapperboard className="size-3.5" /> 做成影片
           </button>
         )}
         <button

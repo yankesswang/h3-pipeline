@@ -58,6 +58,10 @@ function migrate(db: Database.Database) {
   if (!cols("presets").has("purpose"))
     db.exec("ALTER TABLE presets ADD COLUMN purpose TEXT NOT NULL DEFAULT 'generate'");
   db.exec("CREATE INDEX IF NOT EXISTS images_parent ON images(parent_id)");
+  if (!cols("images").has("media")) {
+    db.exec("ALTER TABLE images ADD COLUMN media TEXT NOT NULL DEFAULT 'image'");
+    db.exec("ALTER TABLE images ADD COLUMN duration REAL");
+  }
   db.exec(`
     CREATE TABLE IF NOT EXISTS tools (
       id TEXT PRIMARY KEY,

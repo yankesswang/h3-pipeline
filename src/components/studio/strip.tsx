@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Heart, Loader2, Plus } from "lucide-react";
+import { AlertTriangle, Heart, Loader2, Play, Plus } from "lucide-react";
 import { imageUrl } from "@/lib/client/api";
 import type { ImageRecord, Job } from "@/lib/shared/types";
 import type { Selection } from "./viewer";
@@ -60,11 +60,16 @@ export function Strip({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={imageUrl(img.id, 160)} alt="" loading="lazy" className="h-full w-full object-cover" />
               {img.favorite && <Heart className="absolute right-1 bottom-1 size-3 fill-bad text-bad" />}
+              {img.media === "video" && (
+                <span className="absolute bottom-1 left-1 grid size-4 place-items-center rounded-full bg-black/70">
+                  <Play className="size-2.5 fill-white text-white" />
+                </span>
+              )}
               {used >= 0 && (
                 <span className="absolute top-0.5 left-0.5 rounded bg-accent-strong px-1 font-mono text-[9px] text-white">{used + 1}</span>
               )}
             </button>
-            {onAddRef && used < 0 && (
+            {onAddRef && used < 0 && img.media === "image" && (
               <button
                 onClick={() => onAddRef(img)}
                 title="加為參考圖"

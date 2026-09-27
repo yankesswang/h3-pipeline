@@ -108,7 +108,8 @@ export function ChatPanel({
         <PresetSelect presets={presets} purpose={purpose} value={presetId} onChange={setPresetId} className="w-full text-xs" />
         {imageIds.length > 0 && (
           <p className="mt-2 flex items-center gap-1.5 text-xs text-accent">
-            <Images className="size-3.5" /> 修改模式：LLM 會看到目前的 {imageIds.length} 張圖
+            <Images className="size-3.5" />
+            {purpose === "video" ? `影片模式：LLM 會看到${imageIds.length > 1 ? "第一幀和結尾幀" : "第一幀"}` : `修改模式：LLM 會看到目前的 ${imageIds.length} 張圖`}
           </p>
         )}
       </div>
@@ -116,7 +117,13 @@ export function ChatPanel({
       <div ref={scrollRef} className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
         {messages.length === 0 && (
           <div className="mt-8 text-center text-xs leading-relaxed text-faint">
-            {purpose === "edit" ? (
+            {purpose === "video" ? (
+              <>
+                跟 LLM 聊你想拍的影片，
+                <br />
+                它會寫好畫面、鏡頭運動和一行 Audio 聲音描述。
+              </>
+            ) : purpose === "edit" ? (
               <>
                 跟 LLM 說你想怎麼改這張圖，
                 <br />

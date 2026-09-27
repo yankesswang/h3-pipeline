@@ -18,6 +18,7 @@ import {
   NO_PADS,
   purposeOf,
   startEdit,
+  startVideo,
   toParams,
   type ComposerState,
 } from "@/components/studio/composer-state";
@@ -29,7 +30,7 @@ import { Viewer, type Selection } from "@/components/studio/viewer";
 import { IconButton } from "@/components/ui";
 
 const PREFS_KEY = "studio.composer";
-const DEFAULT_PRESETS: Record<PresetPurpose, string> = { generate: "qwen-general", edit: "qwen-edit" };
+const DEFAULT_PRESETS: Record<PresetPurpose, string> = { generate: "qwen-general", edit: "qwen-edit", video: "h3-video" };
 
 export default function StudioPage() {
   const { jobs, recent, presets, subscribe } = useStudio();
@@ -66,7 +67,10 @@ export default function StudioPage() {
   /** Load an image's settings into the composer, fetching its edit inputs if needed. */
   const loadFromImage = useCallback(
     async (img: ImageRecord, lockSeed: boolean) => {
-      const ids = [img.params.sourceImageId, ...(img.params.refImageIds ?? [])].filter((x): x is string => !!x);
+      const v = img.params.video;
+      const ids = [img.params.sourceImageId, ...(img.params.refImageIds ?? []), v?.firstFrameId, v?.lastFrameId].filter(
+        (x): x is string => !!x,
+      );
       const fetched = await Promise.all(ids.map((id) => lookup(id) ?? api.image(id).catch(() => undefined)));
       const found = fetched.filter((x): x is ImageRecord => !!x);
       remember(found);
@@ -92,12 +96,17 @@ export default function StudioPage() {
     const sp = new URLSearchParams(window.location.search);
     const reuse = sp.get("reuse");
     const edit = sp.get("edit");
-    if (reuse || edit) {
-      api.image((reuse ?? edit)!).then((img) => {
+    const video = sp.get("video");
+    const cont = sp.get("continue");
+    const target = reuse ?? edit ?? video ?? cont;
+    if (target) {
+      api.image(target).then((img) => {
         remember([img]);
         setSelection({ kind: "image", id: img.id });
         if (reuse) void loadFromImage(img, sp.get("seed") === "1");
-        else setComposer((s) => startEdit(s, img));
+        else if (edit) setComposer((s) => startEdit(s, img));
+        else if (video) setComposer((s) => startVideo(s, img));
+        else void continueFrom(img);
       });
       window.history.replaceState(null, "", "/");
     }
@@ -105,11 +114,12 @@ export default function StudioPage() {
   }, []);
 
   useEffect(() => {
-    const { aspect, megapixels, steps, cfg, count, negativePrompt, loras } = composer;
+    const { aspect, megapixels, steps, cfg, count, negativePrompt, loras, mode } = composer;
+    const video = { seconds: composer.video.seconds, megapixels: composer.video.megapixels };
     try {
       localStorage.setItem(
         PREFS_KEY,
-        JSON.stringify({ composer: { aspect, megapixels, steps, cfg, count, negativePrompt, loras }, presetIds, showChat }),
+        JSON.stringify({ composer: { aspect, megapixels, steps, cfg, count, negativePrompt, loras, mode, video }, presetIds, showChat }),
       );
     } catch {}
   }, [composer, presetIds, showChat]);
@@ -262,7 +272,26 @@ export default function StudioPage() {
     setSelection({ kind: "image", id: img.id });
   }
 
+  function makeVideo(img: ImageRecord) {
+    remember([img]);
+    setSelection({ kind: "image", id: img.id });
+    setComposer((s) => startVideo(s, img));
+  }
+
+  /** The next clip starts where this video ends. */
+  async function continueFrom(video: ImageRecord) {
+    setError(undefined);
+    try {
+      const frame = await api.frame(video.id, "last");
+      remember([frame]);
+      setComposer((s) => startVideo(s, frame));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   function edit(img: ImageRecord) {
+    if (img.media === "video") return;
     remember([img]);
     setSelection({ kind: "image", id: img.id });
     setComposer((s) => startEdit(s, img));
@@ -277,13 +306,21 @@ export default function StudioPage() {
       try {
         const saved = await api.upload(images);
         remember(saved);
+        if (composer.mode === "video") {
+          // First drop fills the first frame, the next one the end frame.
+          setComposer((s) =>
+            s.video.first ? { ...s, video: { ...s.video, last: saved[0] } } : startVideo(s, saved[0]),
+          );
+          setSelection({ kind: "image", id: saved[0].id });
+          return;
+        }
         setComposer((s) => (s.edit ? addRefs(s, saved) : addRefs(startEdit(s, saved[0]), saved.slice(1))));
         if (!composer.edit) setSelection({ kind: "image", id: saved[0].id });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
     },
-    [composer.edit, remember],
+    [composer.edit, composer.mode, remember],
   );
 
   // Paste an image from the clipboard anywhere on the page.
@@ -304,7 +341,7 @@ export default function StudioPage() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (t.closest("input, textarea, select, [contenteditable]") || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "e" && shownImage && composer.edit?.source.id !== shownImage.id) edit(shownImage);
+      if (e.key === "e" && shownImage?.media === "image" && composer.edit?.source.id !== shownImage.id) edit(shownImage);
       else if (e.key === "i" && shownImage) setPanel((p) => (p ? null : "info"));
       else if (e.key === "Escape") setPanel(null);
     };
@@ -366,6 +403,8 @@ export default function StudioPage() {
               onToggleInfo={() => setPanel((p) => (p ? null : "info"))}
               editing={stageEditing}
               onEdit={edit}
+              onMakeVideo={makeVideo}
+              onContinue={(v) => void continueFrom(v)}
               stage={
                 stageEditing && source ? (
                   <EditStage
@@ -417,6 +456,8 @@ export default function StudioPage() {
                     image={shownImage}
                     onReuse={(img, lockSeed) => void loadFromImage(img, lockSeed)}
                     onEdit={edit}
+                    onMakeVideo={makeVideo}
+                    onContinue={(v) => void continueFrom(v)}
                     onDeleted={() => {
                       setSelection(null);
                       setPanel(null);
@@ -464,7 +505,14 @@ export default function StudioPage() {
         />
       )}
 
-      {dragging && (
+      {dragging && composer.mode === "video" ? (
+        <div className="pointer-events-none absolute inset-3 z-40 grid place-items-center rounded-2xl border-2 border-dashed border-accent bg-accent-strong/10 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-2 text-accent">
+            <ImageDown className="size-10" />
+            <p className="text-base font-medium">{composer.video.first ? "放開以設為結尾幀" : "放開以設為影片的第一幀"}</p>
+          </div>
+        </div>
+      ) : dragging && (
         <div className="pointer-events-none absolute inset-3 z-40 grid place-items-center rounded-2xl border-2 border-dashed border-accent bg-accent-strong/10 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-2 text-accent">
             <ImageDown className="size-10" />

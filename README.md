@@ -1,9 +1,10 @@
 # Comfy Studio
 
 A friendlier front end for ComfyUI: no node graph, an LLM that writes image
-prompts with your own system prompts, intuitive editing (instructions, brush or
-click-to-select regions, outpainting), a version tree for every image, and any
-ComfyUI workflow turned into a simple form.
+and video prompts with your own system prompts, intuitive editing (instructions,
+brush or click-to-select regions, outpainting), videos with sound from text or
+from any image, a version tree for everything, and any ComfyUI workflow turned
+into a simple form.
 
 ## Run
 
@@ -60,6 +61,21 @@ Click-to-select runs SAM 2.1 (small) in its own Python process, outside
 ComfyUI's queue, so it answers in ~50 ms even while an image is generating.
 The model (~180 MB) downloads on first use.
 
+## Video
+
+The composer's 圖片 / 影片 switch makes MiniMax H3 videos (with audio) instead
+of images. With no first frame it is text to video at the chosen aspect; with
+one ("做成影片" on any image) the video starts from it and keeps its shape; an
+optional end frame makes it move towards a second image. "用最後一幀接續" turns
+a video's last frame into an image and starts the next clip from it.
+
+The workflow is built in `src/lib/tools/video.ts`, mirroring
+`make-minimax-h3-workflow.py` (int8 model, 8-step Turbo LoRA, 24 fps, frames on
+the 17k+5 grid) but choosing the mode in code instead of with switches. Two
+extra SaveImage nodes keep the first and last frames, so posters and
+continuation need no video decoding. Videos are stored as `<id>.mp4` with
+`<id>.png` (first frame) and `<id>.last.png`. About 50 s for 2–3 s at 0.4 MP.
+
 ## Imported workflows
 
 Export a workflow from ComfyUI with *Export (API)*, paste it on 工具 → 匯入,
@@ -80,3 +96,4 @@ LLM calls send `reasoning_effort: "none"` by default (≈10× faster on Qwen 3.5
 2. **M2** instruction editing (up to 9 references), uploads, version tree
 3. **M3** selection canvas: brush, SAM click-select, local edits, outpaint
 4. **M4** workflow import with a field-mapping editor, LoRA library and stacking
+5. **Video** MiniMax H3 text/image to video with sound, clip continuation
