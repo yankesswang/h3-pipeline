@@ -60,7 +60,7 @@ export function EditToolbar({
             <button
               key={t.id}
               disabled={disabled}
-              title={disabled ? "SAM 模型下載中，完成後就能用" : t.hint}
+              title={disabled ? "第一次使用要先下載 SAM 模型（約 180MB），完成後就能用" : t.hint}
               onClick={() => setTool(t.id)}
               className={`flex items-center gap-1 rounded-md px-2.5 py-1 transition disabled:cursor-not-allowed disabled:text-faint ${
                 tool === t.id ? "bg-accent-strong text-white" : "text-muted hover:text-fg"

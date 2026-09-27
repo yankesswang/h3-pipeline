@@ -2,19 +2,26 @@ import { EventEmitter } from "node:events";
 import { nanoid } from "nanoid";
 import fs from "node:fs";
 import type { GenerateParams, Job, PromptOrigin, ServerEvent, ToolId } from "@/lib/shared/types";
-import { builtinTools } from "@/lib/tools/builtin";
-import { buildPrompt, type Tool } from "@/lib/tools/types";
+import { buildPrompt, type ApiWorkflow, type Tool } from "@/lib/tools/types";
 import { comfy, type ComfyMessage } from "./comfy";
 import { afterGenerate, beforeGenerate } from "./gpu";
 import { pngSize } from "./images";
 import { maskPath } from "./masks";
 import { DEFAULT_OUTPAINT_PROMPT, prepareMasked, prepareOutpaint, stitchMasked, stitchOutpaint, type Rect } from "./regions";
 import { getImage, imagePath, insertImage } from "./repo";
+import { customFields, resolveTool } from "./tools";
 
 // One GPU, so jobs run strictly one at a time, in order.
 
 const STAGES: Record<string, string> = {
   UnetLoaderGGUF: "載入模型",
+  LoraLoaderModelOnly: "載入 LoRA",
+  LoraLoader: "載入 LoRA",
+  CheckpointLoaderSimple: "載入模型",
+  CLIPTextEncode: "理解 prompt",
+  KSamplerAdvanced: "生成中",
+  SamplerCustomAdvanced: "生成中",
+  PreviewImage: "儲存",
   CLIPLoader: "載入文字編碼器",
   VAELoader: "載入 VAE",
   QwenImage21Cache: "載入模型",
@@ -42,6 +49,9 @@ const q: QueueState = ((globalThis as unknown as { __queue?: QueueState }).__que
 
 export const bus = q.bus;
 
+/** Post-processing for a running job (region stitching); kept off the Job so it never goes to the browser. */
+const finishers = new WeakMap<Job, ((out: Buffer) => Promise<Buffer>) | undefined>();
+
 function emit(ev: ServerEvent) {
   bus.emit("event", ev);
 }
@@ -56,7 +66,12 @@ export function listJobs() {
 }
 
 export function enqueue(toolId: ToolId, params: GenerateParams, origin?: PromptOrigin): Job {
-  if (!builtinTools[toolId]) throw new Error(`Unknown tool ${toolId}`);
+  resolveTool(toolId); // throws for unknown or deleted tools
+  for (const f of customFields(toolId))
+    if (f.kind === "image") {
+      const id = params.toolValues?.[f.key];
+      if (typeof id !== "string" || !getImage(id)) throw new Error(`「${f.label}」需要選一張圖`);
+    }
   if (toolId === "qwen21-edit") {
     const ids = [params.sourceImageId, ...(params.refImageIds ?? [])];
     if (!params.sourceImageId) throw new Error("修圖需要一張原圖");
@@ -108,30 +123,52 @@ async function pump() {
 }
 
 async function run(job: Job) {
-  const tool = builtinTools[job.tool];
   update(job, { status: "running", stage: "準備 GPU", progress: 0 });
+  let tool: Tool | undefined;
   try {
+    tool = resolveTool(job.tool);
     await beforeGenerate();
-    const region = await prepareRegion(job.params);
-    const images = await uploadInputs(job.params, region?.image);
-    const values = {
-      ...job.params,
-      prompt: region?.prompt ?? job.params.prompt,
-      resolution: editResolution(job.params),
-    };
-    const promptId = await comfy.submit(buildPrompt(tool, values, images));
+    let prompt;
+    if (job.tool.startsWith("custom:")) {
+      prompt = buildPrompt(tool, await customValues(job), [], job.params.loras);
+    } else {
+      const region = await prepareRegion(job.params);
+      const images = await uploadInputs(job.params, region?.image);
+      const values = {
+        ...job.params,
+        prompt: region?.prompt ?? job.params.prompt,
+        resolution: editResolution(job.params),
+      };
+      prompt = buildPrompt(tool, values, images, job.params.loras);
+      finishers.set(job, region?.finish);
+    }
+    const promptId = await comfy.submit(prompt);
     q.comfyPromptIds.set(job.id, promptId);
     update(job, { stage: "排入 ComfyUI" });
-    const outcome = await waitFor(job, promptId);
+    const outcome = await waitFor(job, promptId, prompt);
     if (outcome === "interrupted") return update(job, { status: "cancelled", stage: undefined });
-    const image = await collect(job, tool, promptId, region?.finish);
+    const image = await collect(job, tool, promptId, finishers.get(job));
     update(job, { status: "done", progress: 1, stage: undefined, imageId: image.id });
   } catch (e) {
     update(job, { status: "error", stage: undefined, error: e instanceof Error ? e.message : String(e) });
   } finally {
     q.comfyPromptIds.delete(job.id);
+    finishers.delete(job);
     afterGenerate();
   }
+}
+
+/** An imported tool's values, with image fields turned into uploaded file names. */
+async function customValues(job: Job) {
+  const values = { ...job.params.toolValues };
+  for (const f of customFields(job.tool))
+    if (f.kind === "image") {
+      const id = values[f.key] as string;
+      const file = imagePath(id);
+      if (!file) throw new Error(`找不到圖片 ${id}`);
+      values[f.key] = await comfy.upload(fs.readFileSync(file), `${id}.png`);
+    }
+  return values;
 }
 
 /**
@@ -179,7 +216,7 @@ function editResolution(p: GenerateParams) {
 }
 
 /** Resolve when ComfyUI finishes the prompt. Websocket for progress, history polling as a backstop. */
-function waitFor(job: Job, promptId: string): Promise<"success" | "interrupted"> {
+function waitFor(job: Job, promptId: string, workflow: ApiWorkflow): Promise<"success" | "interrupted"> {
   return new Promise((resolve, reject) => {
     let settled = false;
     const finish = (fn: () => void) => {
@@ -196,7 +233,7 @@ function waitFor(job: Job, promptId: string): Promise<"success" | "interrupted">
           break;
         case "executing": {
           if (msg.data.node === null) return finish(() => resolve("success"));
-          const node = builtinTools[job.tool].workflow[msg.data.node];
+          const node = workflow[msg.data.node];
           if (node) update(job, { stage: STAGES[node.class_type] ?? node.class_type });
           break;
         }

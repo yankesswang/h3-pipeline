@@ -1,10 +1,10 @@
-import { samModelReady, segment, type SamPoint } from "@/lib/server/sam";
+import { samDownload, segment, type SamPoint } from "@/lib/server/sam";
 
 export const dynamic = "force-dynamic";
 
-/** Whether click-to-select is available yet (the model downloads once). */
+/** Whether click-to-select is available yet; the first call starts the one-time model download. */
 export function GET() {
-  return Response.json({ ready: samModelReady() });
+  return Response.json(samDownload());
 }
 
 export async function POST(req: Request) {

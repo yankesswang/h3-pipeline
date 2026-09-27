@@ -43,9 +43,63 @@ export interface GenerateParams {
   maskId?: string;
   /** Editing: grow the canvas by these many pixels and fill the new area. */
   outpaint?: { left: number; top: number; right: number; bottom: number };
+  /** LoRAs applied on top of the model, in order. */
+  loras?: LoraUse[];
+  /** Imported-workflow tools: every field's value, keyed by field key. Image fields hold image ids. */
+  toolValues?: Record<string, unknown>;
 }
 
-export type ToolId = "qwen21-t2i" | "qwen21-edit";
+export interface LoraUse {
+  name: string;
+  strength: number;
+}
+
+export type BuiltinToolId = "qwen21-t2i" | "qwen21-edit";
+/** Built-in tools, or `custom:<id>` for an imported workflow. */
+export type ToolId = BuiltinToolId | `custom:${string}`;
+
+export type FieldKind = "prompt" | "text" | "int" | "float" | "seed" | "bool" | "combo" | "image";
+
+/** One exposed input of an imported workflow. */
+export interface CustomField {
+  /** `${node}.${input}` — unique within the tool. */
+  key: string;
+  node: string;
+  input: string;
+  label: string;
+  kind: FieldKind;
+  default: unknown;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: string[];
+}
+
+export interface CustomTool {
+  id: string;
+  name: string;
+  description: string;
+  workflow: Record<string, { class_type: string; inputs: Record<string, unknown>; _meta?: { title?: string } }>;
+  fields: CustomField[];
+  outputNode: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** A candidate input found while analysing an imported workflow. */
+export interface FieldCandidate extends CustomField {
+  classType: string;
+  nodeTitle: string;
+  /** Pre-ticked in the mapping editor. */
+  suggested: boolean;
+}
+
+export interface LoraInfo {
+  name: string;
+  note: string;
+  defaultStrength: number;
+  hasPreview: boolean;
+}
 
 /** What led to the prompt: kept with every image so it can be reproduced or continued. */
 export interface PromptOrigin {
@@ -112,6 +166,8 @@ export interface Settings {
   /** Ask ComfyUI to free VRAM before each LLM call, when nothing is generating. */
   freeComfyBeforeLlm: boolean;
   defaultPresetId: string;
+  /** Saved LoRA stacks, reusable from the composer. */
+  loraCombos: { name: string; loras: LoraUse[] }[];
 }
 
 export type ServerEvent =

@@ -105,11 +105,11 @@ export default function StudioPage() {
   }, []);
 
   useEffect(() => {
-    const { aspect, megapixels, steps, cfg, count, negativePrompt } = composer;
+    const { aspect, megapixels, steps, cfg, count, negativePrompt, loras } = composer;
     try {
       localStorage.setItem(
         PREFS_KEY,
-        JSON.stringify({ composer: { aspect, megapixels, steps, cfg, count, negativePrompt }, presetIds, showChat }),
+        JSON.stringify({ composer: { aspect, megapixels, steps, cfg, count, negativePrompt, loras }, presetIds, showChat }),
       );
     } catch {}
   }, [composer, presetIds, showChat]);

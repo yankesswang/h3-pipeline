@@ -25,10 +25,20 @@ export interface Tool {
    * node wired to `${prefix}${n}` on `node` (n from 1).
    */
   imageInput?: { node: string; prefix: string; max: number };
+  /**
+   * Where LoRAs go: a chain of LoraLoaderModelOnly nodes is inserted between
+   * `from` (a model output) and the input that consumed it.
+   */
+  loraSlot?: { from: [string, number]; into: { node: string; input: string } };
 }
 
 /** `images` are file names already uploaded to ComfyUI's input folder. */
-export function buildPrompt(tool: Tool, values: Record<string, unknown>, images: string[] = []): ApiWorkflow {
+export function buildPrompt(
+  tool: Tool,
+  values: Record<string, unknown>,
+  images: string[] = [],
+  loras: { name: string; strength: number }[] = [],
+): ApiWorkflow {
   const wf: ApiWorkflow = structuredClone(tool.workflow);
   for (const [name, value] of Object.entries(values)) {
     const field = tool.fields[name];
@@ -46,6 +56,17 @@ export function buildPrompt(tool: Tool, values: Record<string, unknown>, images:
       wf[id] = { class_type: "LoadImage", inputs: { image: file } };
       wf[spec.node].inputs[`${spec.prefix}${i + 1}`] = [id, 0];
     });
+  }
+  if (loras.length) {
+    const slot = tool.loraSlot;
+    if (!slot) throw new Error(`${tool.name} 不支援 LoRA`);
+    let prev: [string, number] = slot.from;
+    loras.forEach((l, i) => {
+      const id = `lora${i + 1}`;
+      wf[id] = { class_type: "LoraLoaderModelOnly", inputs: { model: prev, lora_name: l.name, strength_model: l.strength } };
+      prev = [id, 0];
+    });
+    wf[slot.into.node].inputs[slot.into.input] = prev;
   }
   return wf;
 }

@@ -25,6 +25,7 @@ export function ImageInfo({
   const p = image.params;
   const o = image.origin;
   const uploaded = image.tool === "upload";
+  const customTool = image.tool.startsWith("custom:") ? image.tool.slice("custom:".length) : undefined;
   const edited = image.tool === "qwen21-edit";
 
   async function toggleFavorite() {
@@ -43,7 +44,14 @@ export function ImageInfo({
         <Button variant="primary" className="!px-2.5 !py-1 text-xs" onClick={() => onEdit(image)}>
           <Pencil className="size-3.5" /> 修改這張
         </Button>
-        {!uploaded && (
+        {customTool && (
+          <a href={`/tools/${customTool}?reuse=${image.id}`}>
+            <Button variant="outline" className="!px-2.5 !py-1 text-xs">
+              <Repeat className="size-3.5" /> 回到工具
+            </Button>
+          </a>
+        )}
+        {!uploaded && !customTool && (
           <Button variant="outline" className="!px-2.5 !py-1 text-xs" onClick={() => onReuse(image, false)} title={edited ? "用同樣的原圖和指令再做一次" : "用同樣的 prompt 和設定"}>
             <Repeat className="size-3.5" /> 重用設定
           </Button>

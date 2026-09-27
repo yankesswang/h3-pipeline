@@ -1,8 +1,9 @@
 # Comfy Studio
 
 A friendlier front end for ComfyUI: no node graph, an LLM that writes image
-prompts with your own system prompts, and a gallery that remembers how every
-image was made.
+prompts with your own system prompts, intuitive editing (instructions, brush or
+click-to-select regions, outpainting), a version tree for every image, and any
+ComfyUI workflow turned into a simple form.
 
 ## Run
 
@@ -15,34 +16,67 @@ GGUF models, and optionally an OpenAI-compatible LLM (LM Studio by default).
 ```
 
 Node 22 is expected at `~/.local/opt/node22` (the system Node is too old).
-Data (SQLite + PNGs) lives in `./data`.
+Data (SQLite, PNGs, masks, the SAM model) lives in `./data`.
 
-## Layout
+## What's where
+
+| Page | For |
+| --- | --- |
+| 創作 `/` | Generate, edit, select regions, outpaint, chat with the prompt assistant |
+| 圖庫 `/gallery` | Every image with how it was made; reuse or edit any of them |
+| 工具 `/tools` | Imported ComfyUI workflows as forms |
+| LoRA `/loras` | LoRAs ComfyUI can see, with trigger-word notes and default strengths |
+| Prompt 庫 `/presets` | System prompts for generating and for edit instructions |
+| 設定 `/settings` | LLM endpoint and model, GPU sharing, ComfyUI address |
+
+## Code layout
 
 - `src/lib/tools/` — a *tool* is a ComfyUI API-format workflow plus a map from
-  friendly field names to node inputs. Built-in generation uses this; imported
-  workflows will too.
+  field names to node inputs. The built-in Qwen tools and imported workflows
+  share this shape; tools can also take reference images and a LoRA chain.
 - `src/lib/server/` — ComfyUI client (HTTP + websocket), the one-at-a-time job
-  queue, the LLM proxy, SQLite storage, and GPU sharing between ComfyUI and LM Studio.
+  queue, the LLM proxy, SQLite storage, region editing (`regions.ts`), the SAM
+  side server manager (`sam.ts`), imported tools (`tools.ts`), LoRAs.
 - `src/app/api/` — route handlers. `/api/events` streams job progress (SSE).
-- `src/app/` pages — studio (`/`), gallery, prompt library, settings.
+- `sam/sam_server.py` — click-to-select with SAM 2.1, run with ComfyUI's Python.
 
 ## Editing
 
-"Edit this" puts an image in the composer as `<image1>`; references become
-`<image2>`… and clicking a thumbnail inserts its tag. Drop or paste images to
-upload them (capped at 4 MP). Every edit records its parent, so each image has a
-version tree; a single edit's result becomes the next edit target.
+"Edit this" (or `E`) puts an image in the composer as `<image1>`; references
+become `<image2>`… and clicking a thumbnail inserts its tag. Drop or paste
+images to upload them (capped at 4 MP). Every edit records its parent, so each
+image has a version tree; a single edit's result becomes the next edit target.
+
+Qwen Image 2.1 has no mask input, so regions are handled around it:
+
+- **Brush / click-to-select**: the selection is cropped with context, edited at
+  about 1 MP, and pasted back with a feathered edge. Everything outside the
+  selection keeps its original pixels.
+- **Outpaint**: the image goes on a larger gray canvas (gray works much better
+  than blurred or mirrored edges), the model fills it, and the original is laid
+  back over the middle.
+
+Click-to-select runs SAM 2.1 (small) in its own Python process, outside
+ComfyUI's queue, so it answers in ~50 ms even while an image is generating.
+The model (~180 MB) downloads on first use.
+
+## Imported workflows
+
+Export a workflow from ComfyUI with *Export (API)*, paste it on 工具 → 匯入,
+tick the inputs to expose, and save. Prompt fields get LLM expansion, seeds can
+randomize, LoadImage inputs pick from the gallery. Name a node `[UI] 名稱` in
+ComfyUI to have it ticked and labelled automatically.
 
 ## GPU sharing
 
 16 GB of VRAM does not hold the image model and a local LLM at once. Before a
 generation the app runs `lms unload --all`; when LM Studio fails to load a model
 and nothing is generating, it asks ComfyUI to free VRAM (`/free`) and retries.
+LLM calls send `reasoning_effort: "none"` by default (≈10× faster on Qwen 3.5).
 
-## Roadmap
+## Milestones
 
-1. **M1 (done)** text-to-image, LLM expand + chat, system prompt library, gallery
-2. **M2 (done)** instruction editing with Qwen Image 2.1 (up to 9 references), uploads, version tree
-3. **M3** canvas: mask brush, SAM click-select, outpaint
-4. **M4** workflow import + field mapping editor, LoRA management
+1. **M1** text-to-image, LLM expand + chat, system prompt library, gallery
+2. **M2** instruction editing (up to 9 references), uploads, version tree
+3. **M3** selection canvas: brush, SAM click-select, local edits, outpaint
+4. **M4** workflow import with a field-mapping editor, LoRA library and stacking

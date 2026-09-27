@@ -1,4 +1,14 @@
-import type { ChatMessage, GenerateRequest, ImageRecord, Job, Preset, Settings } from "@/lib/shared/types";
+import type {
+  ChatMessage,
+  CustomTool,
+  FieldCandidate,
+  GenerateRequest,
+  ImageRecord,
+  Job,
+  LoraInfo,
+  Preset,
+  Settings,
+} from "@/lib/shared/types";
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -15,6 +25,8 @@ const send = (method: string, body?: unknown): RequestInit => ({
 });
 
 export type PublicSettings = Settings & { llmApiKeySet: boolean };
+export type ToolDraft = Pick<CustomTool, "name" | "description" | "workflow" | "fields" | "outputNode">;
+export const loraPreviewUrl = (name: string) => `/api/loras/preview?name=${encodeURIComponent(name)}`;
 export type PresetDraft = Pick<Preset, "name" | "family" | "purpose" | "content">;
 
 export const api = {
@@ -50,7 +62,26 @@ export const api = {
   settings: () => fetch("/api/settings").then(json<PublicSettings>),
   saveSettings: (s: Partial<Settings>) => fetch("/api/settings", send("PUT", s)).then(json<PublicSettings>),
   llmModels: () => fetch("/api/llm/models").then(json<{ models: string[]; error?: string }>),
-  samReady: () => fetch("/api/sam").then(json<{ ready: boolean }>),
+  tools: () => fetch("/api/tools").then(json<{ builtin: { id: string; name: string }[]; custom: CustomTool[] }>),
+  tool: (id: string) => fetch(`/api/tools/${id}`).then(json<CustomTool>),
+  analyzeWorkflow: (workflow: unknown) =>
+    fetch("/api/tools/analyze", send("POST", { workflow })).then(
+      json<{
+        workflow: CustomTool["workflow"];
+        candidates: FieldCandidate[];
+        outputs: { id: string; title: string; classType: string }[];
+        missing: string[];
+      }>,
+    ),
+  saveTool: (t: ToolDraft, id?: string) =>
+    fetch(id ? `/api/tools/${id}` : "/api/tools", send(id ? "PUT" : "POST", t)).then(json<CustomTool>),
+  deleteTool: (id: string) => fetch(`/api/tools/${id}`, send("DELETE")).then(json<void>),
+
+  loras: () => fetch("/api/loras").then(json<{ loras: LoraInfo[]; folders: string[]; error?: string }>),
+  saveLoraMeta: (name: string, note: string, defaultStrength: number) =>
+    fetch("/api/loras/meta", send("PUT", { name, note, defaultStrength })).then(json<void>),
+
+  samReady: () => fetch("/api/sam").then(json<{ ready: boolean; progress: number; error?: string }>),
   sam: (imageId: string, points: [number, number, 0 | 1][]) =>
     fetch("/api/sam", send("POST", { imageId, points })).then(json<{ mask: string; score: number }>),
   status: () => fetch("/api/status").then(json<{ comfy: boolean; llm: boolean; llmModel: string }>),

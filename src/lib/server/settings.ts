@@ -11,6 +11,7 @@ const DEFAULTS: Settings = {
   unloadLlmBeforeGenerate: true,
   freeComfyBeforeLlm: false,
   defaultPresetId: "qwen-general",
+  loraCombos: [],
 };
 
 export function getSettings(): Settings {

@@ -8,6 +8,7 @@ import type { ImageRecord } from "@/lib/shared/types";
 import { Button, Chip, IconButton, PresetSelect, inputCls } from "@/components/ui";
 import { useStudio } from "@/components/studio-provider";
 import { addRefs, editImageIds, MAX_REFS, purposeOf, type ComposerState } from "./composer-state";
+import { LoraPicker } from "./lora-picker";
 
 export function Composer({
   state,
@@ -224,9 +225,14 @@ export function Composer({
           ))}
         </div>
 
-        <IconButton label="進階參數" onClick={() => setAdvanced((v) => !v)} className={advanced ? "text-accent" : ""}>
+        <IconButton label="進階參數與 LoRA" onClick={() => setAdvanced((v) => !v)} className={advanced ? "text-accent" : ""}>
           <SlidersHorizontal className="size-4" />
         </IconButton>
+        {state.loras.length > 0 && !advanced && (
+          <button onClick={() => setAdvanced(true)} className="rounded-md bg-accent-strong/20 px-2 py-1 text-xs text-accent">
+            LoRA ×{state.loras.length}
+          </button>
+        )}
         {!editing && (
           <IconButton label="上傳圖片來修改" onClick={() => fileRef.current?.click()}>
             <ImagePlus className="size-4" />
@@ -305,6 +311,8 @@ export function Composer({
               {state.seedLocked ? "固定 seed" : "每次隨機"}
             </Button>
           </div>
+          <label>LoRA</label>
+          <LoraPicker value={state.loras} onChange={(loras) => set({ loras })} />
           <label>負面 prompt</label>
           <input
             value={state.negativePrompt}

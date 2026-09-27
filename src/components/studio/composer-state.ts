@@ -1,6 +1,6 @@
 import type { AspectId } from "@/lib/shared/sizes";
 import { randomSeed, sizeFor } from "@/lib/shared/sizes";
-import type { GenerateParams, ImageRecord, PresetPurpose, PromptOrigin } from "@/lib/shared/types";
+import type { GenerateParams, ImageRecord, LoraUse, PresetPurpose, PromptOrigin } from "@/lib/shared/types";
 
 export interface Pads {
   left: number;
@@ -34,6 +34,8 @@ export interface ComposerState {
   /** Unlocked: a fresh random seed every run. */
   seedLocked: boolean;
   count: number;
+  /** Applied to both generating and editing. */
+  loras: LoraUse[];
   origin?: PromptOrigin;
   /** Set: the composer edits this image instead of making a new one. */
   edit?: EditTarget;
@@ -49,6 +51,7 @@ export const initialComposer: ComposerState = {
   seed: randomSeed(),
   seedLocked: false,
   count: 1,
+  loras: [],
 };
 
 export const purposeOf = (s: ComposerState): PresetPurpose => (s.edit ? "edit" : "generate");
@@ -67,6 +70,7 @@ export function toParams(s: ComposerState): GenerateParams {
     seed: s.seedLocked ? s.seed : randomSeed(),
     ...(s.edit ? { sourceImageId: s.edit.source.id, refImageIds: s.edit.refs.map((r) => r.id) } : {}),
     ...(s.edit && hasPads(s.edit.outpaint) ? { outpaint: s.edit.outpaint } : {}),
+    ...(s.loras.length ? { loras: s.loras } : {}),
   };
 }
 
@@ -107,6 +111,7 @@ export function fromImage(
     seed: p.seed,
     seedLocked: lockSeed,
     count: 1,
+    loras: p.loras ?? [],
     origin: img.origin,
     edit: source
       ? {

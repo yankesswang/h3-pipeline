@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Images, ScrollText, Settings, Sparkles } from "lucide-react";
+import { Boxes, Images, Layers, ScrollText, Settings, Sparkles } from "lucide-react";
 import { useStudio } from "./studio-provider";
 
 const NAV = [
   { href: "/", label: "創作", icon: Sparkles },
   { href: "/gallery", label: "圖庫", icon: Images },
+  { href: "/tools", label: "工具", icon: Boxes },
+  { href: "/loras", label: "LoRA", icon: Layers },
   { href: "/presets", label: "Prompt 庫", icon: ScrollText },
   { href: "/settings", label: "設定", icon: Settings },
 ];

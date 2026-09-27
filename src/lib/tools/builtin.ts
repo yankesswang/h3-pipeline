@@ -1,4 +1,4 @@
-import type { ToolId } from "@/lib/shared/types";
+import type { BuiltinToolId } from "@/lib/shared/types";
 import type { ApiWorkflow, Tool } from "./types";
 
 // Both tools are built from the official Qwen Image 2.1 templates with the
@@ -58,6 +58,7 @@ export const qwen21TextToImage: Tool = {
     "7": sampler(["6", 0]),
     ...tail,
   },
+  loraSlot: { from: ["1", 0], into: { node: "2", input: "model" } },
   fields: {
     ...commonFields,
     width: { node: "6", input: "width" },
@@ -81,6 +82,7 @@ export const qwen21Edit: Tool = {
     "7": sampler(["5", 2]),
     ...tail,
   },
+  loraSlot: { from: ["1", 0], into: { node: "2", input: "model" } },
   fields: {
     ...commonFields,
     // Pixel budget each image is resized to; 0 keeps every image at its own size.
@@ -89,7 +91,7 @@ export const qwen21Edit: Tool = {
   imageInput: { node: "5", prefix: "images.image_", max: 10 },
 };
 
-export const builtinTools: Record<ToolId, Tool> = {
+export const builtinTools: Record<BuiltinToolId, Tool> = {
   "qwen21-t2i": qwen21TextToImage,
   "qwen21-edit": qwen21Edit,
 };

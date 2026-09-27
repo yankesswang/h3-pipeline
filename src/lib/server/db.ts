@@ -58,6 +58,23 @@ function migrate(db: Database.Database) {
   if (!cols("presets").has("purpose"))
     db.exec("ALTER TABLE presets ADD COLUMN purpose TEXT NOT NULL DEFAULT 'generate'");
   db.exec("CREATE INDEX IF NOT EXISTS images_parent ON images(parent_id)");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tools (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      workflow TEXT NOT NULL,
+      fields TEXT NOT NULL,
+      output_node TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS lora_meta (
+      name TEXT PRIMARY KEY,
+      note TEXT NOT NULL DEFAULT '',
+      default_strength REAL NOT NULL DEFAULT 1
+    );
+  `);
 }
 
 // Survive Next.js dev hot reloads without opening the file twice.
