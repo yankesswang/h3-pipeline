@@ -104,7 +104,7 @@ export default function GalleryPage() {
               className="group relative mb-3 block w-full overflow-hidden rounded-lg border border-line break-inside-avoid"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={imageUrl(img.id)} alt="" loading="lazy" className="w-full" style={{ aspectRatio: img.width / img.height }} />
+               <img src={imageUrl(img.id, 640)} alt="" loading="lazy" className="w-full" style={{ aspectRatio: img.width / img.height }} />
               <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2 pt-8 text-left text-xs opacity-0 transition group-hover:opacity-100">
                 <p className="line-clamp-2">{img.params.prompt}</p>
               </div>
@@ -141,6 +141,7 @@ export default function GalleryPage() {
             <ImageInfo
               image={open}
               onReuse={(img, lockSeed) => router.push(`/?reuse=${img.id}${lockSeed ? "&seed=1" : ""}`)}
+              onEdit={(img) => router.push(`/?edit=${img.id}`)}
               onDeleted={(id) => {
                 setImages((cur) => cur.filter((c) => c.id !== id));
                 setOpenIdx((i) => (i !== null && i >= shown.length - 1 ? shown.length - 2 : i));

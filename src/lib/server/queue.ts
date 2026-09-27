@@ -1,11 +1,13 @@
 import { EventEmitter } from "node:events";
 import { nanoid } from "nanoid";
-import type { GenerateParams, Job, PromptOrigin, ServerEvent } from "@/lib/shared/types";
+import fs from "node:fs";
+import type { GenerateParams, Job, PromptOrigin, ServerEvent, ToolId } from "@/lib/shared/types";
 import { builtinTools } from "@/lib/tools/builtin";
 import { buildPrompt, type Tool } from "@/lib/tools/types";
 import { comfy, type ComfyMessage } from "./comfy";
 import { afterGenerate, beforeGenerate } from "./gpu";
-import { insertImage } from "./repo";
+import { pngSize } from "./images";
+import { getImage, imagePath, insertImage } from "./repo";
 
 // One GPU, so jobs run strictly one at a time, in order.
 
@@ -16,6 +18,7 @@ const STAGES: Record<string, string> = {
   QwenImage21Cache: "載入模型",
   EmptyLatentImage: "準備畫布",
   TextEncodeQwenImage21: "理解 prompt",
+  LoadImage: "讀取圖片",
   KSampler: "生成中",
   VAEDecode: "解碼",
   SaveImage: "儲存",
@@ -50,8 +53,15 @@ export function listJobs() {
   return q.jobs;
 }
 
-export function enqueue(toolId: string, params: GenerateParams, origin?: PromptOrigin): Job {
+export function enqueue(toolId: ToolId, params: GenerateParams, origin?: PromptOrigin): Job {
   if (!builtinTools[toolId]) throw new Error(`Unknown tool ${toolId}`);
+  if (toolId === "qwen21-edit") {
+    const ids = [params.sourceImageId, ...(params.refImageIds ?? [])];
+    if (!params.sourceImageId) throw new Error("修圖需要一張原圖");
+    const missing = ids.find((id) => !id || !getImage(id));
+    if (missing !== undefined) throw new Error(`找不到圖片 ${missing}`);
+    if (ids.length > 10) throw new Error("最多 10 張圖（原圖 + 9 張參考）");
+  }
   const job: Job = {
     id: nanoid(10),
     status: "queued",
@@ -100,7 +110,9 @@ async function run(job: Job) {
   update(job, { status: "running", stage: "準備 GPU", progress: 0 });
   try {
     await beforeGenerate();
-    const promptId = await comfy.submit(buildPrompt(tool, { ...job.params }));
+    const images = await uploadInputs(job.params);
+    const values = { ...job.params, resolution: editResolution(job.params) };
+    const promptId = await comfy.submit(buildPrompt(tool, values, images));
     q.comfyPromptIds.set(job.id, promptId);
     update(job, { stage: "排入 ComfyUI" });
     const outcome = await waitFor(job, promptId);
@@ -113,6 +125,24 @@ async function run(job: Job) {
     q.comfyPromptIds.delete(job.id);
     afterGenerate();
   }
+}
+
+/** Send the source and reference images to ComfyUI's input folder. */
+async function uploadInputs(p: GenerateParams): Promise<string[]> {
+  if (!p.sourceImageId) return [];
+  const ids = [p.sourceImageId, ...(p.refImageIds ?? [])];
+  return Promise.all(
+    ids.map((id) => {
+      const file = imagePath(id);
+      if (!file) throw new Error(`找不到圖片 ${id}`);
+      return comfy.upload(fs.readFileSync(file), `${id}.png`);
+    }),
+  );
+}
+
+/** 0 keeps every image at its own size (uploads are already capped at 4 MP). */
+function editResolution(p: GenerateParams) {
+  return p.sourceImageId ? 0 : undefined;
 }
 
 /** Resolve when ComfyUI finishes the prompt. Websocket for progress, history polling as a backstop. */
@@ -162,14 +192,16 @@ async function collect(job: Job, tool: Tool, promptId: string) {
   const ref = h?.outputs?.[tool.outputNode]?.images?.[0];
   if (!ref) throw new Error("ComfyUI 沒有回傳圖片");
   const png = await comfy.fetchImage(ref);
+  const { width, height } = pngSize(png);
   const image = insertImage(
     {
       id: nanoid(12),
-      tool: tool.id,
+      tool: job.tool,
       params: job.params,
       origin: job.origin,
-      width: job.params.width,
-      height: job.params.height,
+      parentId: job.params.sourceImageId,
+      width,
+      height,
       favorite: false,
       createdAt: Date.now(),
     },

@@ -27,6 +27,13 @@ Data (SQLite + PNGs) lives in `./data`.
 - `src/app/api/` — route handlers. `/api/events` streams job progress (SSE).
 - `src/app/` pages — studio (`/`), gallery, prompt library, settings.
 
+## Editing
+
+"Edit this" puts an image in the composer as `<image1>`; references become
+`<image2>`… and clicking a thumbnail inserts its tag. Drop or paste images to
+upload them (capped at 4 MP). Every edit records its parent, so each image has a
+version tree; a single edit's result becomes the next edit target.
+
 ## GPU sharing
 
 16 GB of VRAM does not hold the image model and a local LLM at once. Before a
@@ -36,6 +43,6 @@ and nothing is generating, it asks ComfyUI to free VRAM (`/free`) and retries.
 ## Roadmap
 
 1. **M1 (done)** text-to-image, LLM expand + chat, system prompt library, gallery
-2. **M2** instruction editing with Qwen Image 2.1 (multi-reference), version tree
+2. **M2 (done)** instruction editing with Qwen Image 2.1 (up to 9 references), uploads, version tree
 3. **M3** canvas: mask brush, SAM click-select, outpaint
 4. **M4** workflow import + field mapping editor, LoRA management

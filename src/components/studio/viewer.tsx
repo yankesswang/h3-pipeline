@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ImageIcon, Info, Loader2, X } from "lucide-react";
+import { AlertTriangle, ImageIcon, Info, Loader2, Pencil, X } from "lucide-react";
 import { api, imageUrl } from "@/lib/client/api";
 import type { ImageRecord, Job } from "@/lib/shared/types";
 
@@ -13,12 +13,17 @@ export function Viewer({
   queuePosition,
   showInfo,
   onToggleInfo,
+  editing,
+  onEdit,
 }: {
   image?: ImageRecord;
   job?: Job;
   queuePosition?: number;
   showInfo: boolean;
   onToggleInfo: () => void;
+  /** This image is the current edit target. */
+  editing: boolean;
+  onEdit: (img: ImageRecord) => void;
 }) {
   if (job && !image) return <JobStage job={job} queuePosition={queuePosition} />;
 
@@ -28,6 +33,7 @@ export function Viewer({
         <div className="flex flex-col items-center gap-3">
           <ImageIcon className="size-10" strokeWidth={1} />
           <p>在下方輸入想法，或和右側的 Prompt 助手聊聊</p>
+          <p className="text-xs">也可以把圖片拖進來或貼上（Ctrl+V）來修改</p>
         </div>
       </div>
     );
@@ -41,15 +47,28 @@ export function Viewer({
         alt={image.params.prompt}
         className="checker max-h-full max-w-full rounded-lg object-contain shadow-2xl shadow-black/50"
       />
-      <button
-        onClick={onToggleInfo}
-        title="圖片資訊"
-        className={`absolute top-2 right-2 grid size-9 place-items-center rounded-lg backdrop-blur transition ${
-          showInfo ? "bg-accent-strong text-white" : "bg-black/50 text-fg opacity-0 group-hover:opacity-100"
-        }`}
-      >
-        <Info className="size-4" />
-      </button>
+      <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-xl bg-black/60 p-1 backdrop-blur">
+        {editing ? (
+          <span className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-accent">
+            <Pencil className="size-3.5" /> 正在修改這張
+          </span>
+        ) : (
+          <button
+            onClick={() => onEdit(image)}
+            className="flex items-center gap-1.5 rounded-lg bg-accent-strong px-3 py-1.5 text-xs font-medium text-white hover:bg-accent"
+            title="修改這張（E）"
+          >
+            <Pencil className="size-3.5" /> 修改這張
+          </button>
+        )}
+        <button
+          onClick={onToggleInfo}
+          title="圖片資訊與版本（I）"
+          className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs ${showInfo ? "bg-raised text-fg" : "text-fg hover:bg-white/10"}`}
+        >
+          <Info className="size-3.5" /> 資訊與版本
+        </button>
+      </div>
     </div>
   );
 }

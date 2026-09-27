@@ -73,6 +73,18 @@ class ComfyClient {
     return res.prompt_id;
   }
 
+  /** Upload to ComfyUI's input folder; returns the name LoadImage should use. */
+  async upload(data: Buffer, name: string): Promise<string> {
+    const form = new FormData();
+    form.append("image", new Blob([new Uint8Array(data)], { type: "image/png" }), name);
+    form.append("subfolder", "comfy-studio");
+    form.append("overwrite", "true");
+    const res = await fetch(`${this.baseUrl}/upload/image`, { method: "POST", body: form });
+    if (!res.ok) throw new Error(`ComfyUI /upload/image → ${res.status}`);
+    const body = (await res.json()) as { name: string; subfolder: string };
+    return body.subfolder ? `${body.subfolder}/${body.name}` : body.name;
+  }
+
   async history(promptId: string) {
     const h = await this.req<
       Record<

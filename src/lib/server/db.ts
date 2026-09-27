@@ -5,9 +5,11 @@ import { BUILTIN_PRESETS } from "./presets-builtin";
 
 export const DATA_DIR = process.env.STUDIO_DATA_DIR ?? path.join(process.cwd(), "data");
 export const IMAGE_DIR = path.join(DATA_DIR, "images");
+export const THUMB_DIR = path.join(DATA_DIR, "thumbs");
 
 function open() {
   fs.mkdirSync(IMAGE_DIR, { recursive: true });
+  fs.mkdirSync(THUMB_DIR, { recursive: true });
   const db = new Database(path.join(DATA_DIR, "studio.db"));
   db.pragma("journal_mode = WAL");
   db.exec(`
@@ -37,13 +39,23 @@ function open() {
       value TEXT NOT NULL
     );
   `);
+  migrate(db);
   // Built-in presets are refreshed on every start; users edit copies of them.
   const upsert = db.prepare(
-    `INSERT INTO presets (id, name, family, content, builtin, updated_at) VALUES (?, ?, ?, ?, 1, 0)
-     ON CONFLICT(id) DO UPDATE SET name = excluded.name, family = excluded.family, content = excluded.content`,
+    `INSERT INTO presets (id, name, family, purpose, content, builtin, updated_at) VALUES (?, ?, ?, ?, ?, 1, 0)
+     ON CONFLICT(id) DO UPDATE SET name = excluded.name, family = excluded.family,
+       purpose = excluded.purpose, content = excluded.content`,
   );
-  for (const p of BUILTIN_PRESETS) upsert.run(p.id, p.name, p.family, p.content);
+  for (const p of BUILTIN_PRESETS) upsert.run(p.id, p.name, p.family, p.purpose, p.content);
   return db;
+}
+
+function migrate(db: Database.Database) {
+  const cols = (table: string) =>
+    new Set((db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name));
+  if (!cols("presets").has("purpose"))
+    db.exec("ALTER TABLE presets ADD COLUMN purpose TEXT NOT NULL DEFAULT 'generate'");
+  db.exec("CREATE INDEX IF NOT EXISTS images_parent ON images(parent_id)");
 }
 
 // Survive Next.js dev hot reloads without opening the file twice.

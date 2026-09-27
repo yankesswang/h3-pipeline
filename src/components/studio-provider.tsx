@@ -15,6 +15,8 @@ interface StudioState {
   /** Called by pages that change images, so the strip stays in sync. */
   patchImage: (img: ImageRecord) => void;
   removeImage: (id: string) => void;
+  /** Listen to raw server events (e.g. to react when a job finishes). Returns an unsubscribe function. */
+  subscribe: (fn: (ev: ServerEvent) => void) => () => void;
 }
 
 const Ctx = createContext<StudioState | null>(null);
@@ -30,6 +32,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [recent, setRecent] = useState<ImageRecord[]>([]);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [status, setStatus] = useState<StudioState["status"]>(null);
+  const [listeners] = useState(() => new Set<(ev: ServerEvent) => void>());
+  const subscribe = useCallback(
+    (fn: (ev: ServerEvent) => void) => {
+      listeners.add(fn);
+      return () => void listeners.delete(fn);
+    },
+    [listeners],
+  );
 
   const reloadPresets = useCallback(async () => setPresets(await api.presets()), []);
   const refreshStatus = useCallback(async () => setStatus(await api.status().catch(() => null)), []);
@@ -44,6 +54,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     const es = new EventSource("/api/events");
     es.onmessage = (m) => {
       const ev = JSON.parse(m.data) as ServerEvent;
+      for (const fn of listeners) fn(ev);
       if (ev.type === "job")
         setJobs((js) => {
           const i = js.findIndex((j) => j.id === ev.job.id);
@@ -60,7 +71,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       clearInterval(t);
       es.close();
     };
-  }, [reloadPresets, refreshStatus]);
+  }, [reloadPresets, refreshStatus, listeners]);
 
   const patchImage = useCallback(
     (img: ImageRecord) => setRecent((r) => r.map((x) => (x.id === img.id ? img : x))),
@@ -69,7 +80,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const removeImage = useCallback((id: string) => setRecent((r) => r.filter((x) => x.id !== id)), []);
 
   return (
-    <Ctx.Provider value={{ jobs, recent, presets, reloadPresets, status, refreshStatus, patchImage, removeImage }}>
+    <Ctx.Provider value={{ jobs, recent, presets, reloadPresets, status, refreshStatus, patchImage, removeImage, subscribe }}>
       {children}
     </Ctx.Provider>
   );

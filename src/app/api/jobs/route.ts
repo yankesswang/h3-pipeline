@@ -12,8 +12,11 @@ export async function POST(req: Request) {
   const p = body.params;
   if (!p?.prompt?.trim()) return Response.json({ error: "prompt 不能是空的" }, { status: 400 });
   const count = Math.min(Math.max(1, body.count || 1), 8);
-  const jobs = Array.from({ length: count }, (_, i) =>
-    enqueue("qwen21-t2i", { ...p, seed: p.seed + i }, body.origin),
-  );
-  return Response.json(jobs);
+  const tool = body.tool ?? (p.sourceImageId ? "qwen21-edit" : "qwen21-t2i");
+  try {
+    const jobs = Array.from({ length: count }, (_, i) => enqueue(tool, { ...p, seed: p.seed + i }, body.origin));
+    return Response.json(jobs);
+  } catch (e) {
+    return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 400 });
+  }
 }

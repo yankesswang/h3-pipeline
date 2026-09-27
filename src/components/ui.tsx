@@ -1,7 +1,7 @@
 "use client";
 
 import type { ButtonHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
-import { FAMILY_LABELS, type Preset } from "@/lib/shared/types";
+import { FAMILY_LABELS, type Preset, type PresetPurpose } from "@/lib/shared/types";
 
 type Variant = "primary" | "ghost" | "outline" | "danger";
 
@@ -64,16 +64,20 @@ export function Chip({ on, children, onClick }: { on: boolean; children: ReactNo
 }
 
 export function PresetSelect({
-  presets,
+  presets: all,
+  purpose,
   value,
   onChange,
   className,
 }: {
   presets: Preset[];
+  /** Only offer presets written for this job. */
+  purpose: PresetPurpose;
   value: string;
   onChange: (id: string) => void;
   className?: string;
 }) {
+  const presets = all.filter((p) => p.purpose === purpose);
   const families = [...new Set(presets.map((p) => p.family))];
   return (
     <Select value={value} onChange={(e) => onChange(e.target.value)} className={className} title="System prompt 範本">

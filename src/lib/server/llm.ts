@@ -1,5 +1,6 @@
 import type { ChatMessage } from "@/lib/shared/types";
 import { beforeLlmCall, freeComfyForLlm } from "./gpu";
+import { visionDataUrl } from "./images";
 import { getSettings } from "./settings";
 
 // Proxy to any OpenAI-compatible /chat/completions endpoint (LM Studio,
@@ -9,6 +10,25 @@ import { getSettings } from "./settings";
 //   {"t":"error","d":"..."}
 
 export type LlmChunk = { t: "reasoning" | "content" | "error"; d: string };
+
+type Part = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+export type LlmMessage = { role: ChatMessage["role"]; content: string | Part[] };
+
+/**
+ * Attach images to a user message, labelled the way edit instructions refer to
+ * them: image 1 is the one being edited, the rest are references.
+ */
+export async function withImages(text: string, imageIds: string[]): Promise<Part[]> {
+  const urls = await Promise.all(imageIds.map(visionDataUrl));
+  const legend =
+    imageIds.length === 1
+      ? "[The attached image is <image1>, the image being edited.]"
+      : `[Attached images, in order: <image1> is the image being edited; ${imageIds
+          .slice(1)
+          .map((_, i) => `<image${i + 2}>`)
+          .join(", ")} ${imageIds.length === 2 ? "is a reference" : "are references"}.]`;
+  return [{ type: "text", text: `${text}\n\n${legend}` }, ...urls.map((url) => ({ type: "image_url" as const, image_url: { url } }))];
+}
 
 function headers() {
   const s = getSettings();
@@ -69,7 +89,7 @@ class ThinkSplitter {
   }
 }
 
-export function streamChat(messages: ChatMessage[], signal?: AbortSignal): ReadableStream<Uint8Array> {
+export function streamChat(messages: LlmMessage[], signal?: AbortSignal): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
   return new ReadableStream({
     async start(controller) {
@@ -147,4 +167,4 @@ export const CHAT_PROTOCOL = `
 
 ---
 You are chatting with the user to develop an image idea together. Ask short questions when the idea is unclear, and suggest options.
-Whenever you give a complete, ready-to-use image prompt, put it inside <prompt>...</prompt> tags, following the prompt-writing rules above. Only one <prompt> block per reply. Reply to the user in the language they write in; the prompt itself follows the rules above.`;
+Whenever you give a complete, ready-to-use prompt or edit instruction, put it inside <prompt>...</prompt> tags, following the prompt-writing rules above. Only one <prompt> block per reply. Reply to the user in the language they write in; the prompt itself follows the rules above.`;

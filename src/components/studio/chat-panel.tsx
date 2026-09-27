@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Brain, CornerDownLeft, Eraser, Sparkles, Square } from "lucide-react";
+import { ArrowUp, Brain, CornerDownLeft, Eraser, Images, Sparkles, Square } from "lucide-react";
 import { extractPrompt, streamLlm } from "@/lib/client/api";
-import type { ChatMessage } from "@/lib/shared/types";
+import type { ChatMessage, PresetPurpose } from "@/lib/shared/types";
 import { IconButton, PresetSelect } from "@/components/ui";
 import { useStudio } from "@/components/studio-provider";
 
@@ -17,10 +17,15 @@ const STORE_KEY = "studio.chat";
 export function ChatPanel({
   presetId,
   setPresetId,
+  purpose,
+  imageIds,
   onUsePrompt,
 }: {
   presetId: string;
   setPresetId: (id: string) => void;
+  purpose: PresetPurpose;
+  /** Edit mode: the images the LLM gets to see with the next message. */
+  imageIds: string[];
   onUsePrompt: (prompt: string, chat: ChatMessage[], generate: boolean) => void;
 }) {
   const { presets } = useStudio();
@@ -64,7 +69,7 @@ export function ChatPanel({
     try {
       await streamLlm(
         "/api/llm/chat",
-        { presetId, messages: plain(history) },
+        { presetId, messages: plain(history), imageIds },
         {
           onContent: (t) => patchLast((m) => ({ ...m, content: m.content + t })),
           onReasoning: (t) => patchLast((m) => ({ ...m, reasoning: (m.reasoning ?? "") + t })),
@@ -100,15 +105,30 @@ export function ChatPanel({
       </header>
 
       <div className="border-b border-line px-4 py-2">
-        <PresetSelect presets={presets} value={presetId} onChange={setPresetId} className="w-full text-xs" />
+        <PresetSelect presets={presets} purpose={purpose} value={presetId} onChange={setPresetId} className="w-full text-xs" />
+        {imageIds.length > 0 && (
+          <p className="mt-2 flex items-center gap-1.5 text-xs text-accent">
+            <Images className="size-3.5" /> 修改模式：LLM 會看到目前的 {imageIds.length} 張圖
+          </p>
+        )}
       </div>
 
       <div ref={scrollRef} className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
         {messages.length === 0 && (
           <div className="mt-8 text-center text-xs leading-relaxed text-faint">
-            跟 LLM 聊你想要的畫面，
-            <br />
-            它會問問題、給建議，最後產出可直接用的 prompt。
+            {purpose === "edit" ? (
+              <>
+                跟 LLM 說你想怎麼改這張圖，
+                <br />
+                它看得到原圖和參考圖，會寫出精確的修圖指令。
+              </>
+            ) : (
+              <>
+                跟 LLM 聊你想要的畫面，
+                <br />
+                它會問問題、給建議，最後產出可直接用的 prompt。
+              </>
+            )}
             <br />
             <br />
             上方可以切換 system prompt 範本。
@@ -143,7 +163,7 @@ export function ChatPanel({
               }
             }}
             rows={2}
-            placeholder="例如：想做一張賽博龐克風的台北夜市海報"
+            placeholder={purpose === "edit" ? "例如：想讓背景變成下雪的夜晚" : "例如：想做一張賽博龐克風的台北夜市海報"}
             className="flex-1 resize-none bg-transparent px-1 text-sm outline-none placeholder:text-faint"
           />
           {streaming ? (
@@ -202,7 +222,7 @@ function AssistantMessage({
                 onClick={() => onUse(prompt, true)}
                 className="flex items-center gap-1 rounded-md bg-accent-strong px-2 py-1 text-xs text-white hover:bg-accent"
               >
-                <Sparkles className="size-3" /> 直接生成
+                <Sparkles className="size-3" /> 直接執行
               </button>
             </div>
           )}

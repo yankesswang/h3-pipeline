@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, Download, Heart, Repeat, Trash2 } from "lucide-react";
+import { Check, Copy, Download, Heart, Pencil, Repeat, Trash2 } from "lucide-react";
 import { api, imageUrl } from "@/lib/client/api";
 import type { ImageRecord } from "@/lib/shared/types";
 import { Button, IconButton } from "./ui";
@@ -11,10 +11,12 @@ import { useStudio } from "./studio-provider";
 export function ImageInfo({
   image,
   onReuse,
+  onEdit,
   onDeleted,
 }: {
   image: ImageRecord;
   onReuse: (img: ImageRecord, lockSeed: boolean) => void;
+  onEdit: (img: ImageRecord) => void;
   onDeleted: (id: string) => void;
 }) {
   const { patchImage, removeImage } = useStudio();
@@ -22,6 +24,8 @@ export function ImageInfo({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const p = image.params;
   const o = image.origin;
+  const uploaded = image.tool === "upload";
+  const edited = image.tool === "qwen21-edit";
 
   async function toggleFavorite() {
     patchImage(await api.setFavorite(image.id, !image.favorite));
@@ -36,12 +40,14 @@ export function ImageInfo({
   return (
     <div className="flex flex-col gap-4 text-xs">
       <div className="flex flex-wrap items-center gap-1">
-        <Button variant="primary" className="!px-2.5 !py-1 text-xs" onClick={() => onReuse(image, false)}>
-          <Repeat className="size-3.5" /> 重用設定
+        <Button variant="primary" className="!px-2.5 !py-1 text-xs" onClick={() => onEdit(image)}>
+          <Pencil className="size-3.5" /> 修改這張
         </Button>
-        <Button variant="outline" className="!px-2.5 !py-1 text-xs" onClick={() => onReuse(image, true)}>
-          連 seed 一起
-        </Button>
+        {!uploaded && (
+          <Button variant="outline" className="!px-2.5 !py-1 text-xs" onClick={() => onReuse(image, false)} title={edited ? "用同樣的原圖和指令再做一次" : "用同樣的 prompt 和設定"}>
+            <Repeat className="size-3.5" /> 重用設定
+          </Button>
+        )}
         <div className="ml-auto flex">
           <IconButton label={image.favorite ? "取消收藏" : "收藏"} onClick={toggleFavorite}>
             <Heart className={`size-4 ${image.favorite ? "fill-bad text-bad" : ""}`} />
@@ -61,8 +67,14 @@ export function ImageInfo({
         </div>
       </div>
 
+      {uploaded ? (
+        <p className="text-muted">
+          從外部上傳的圖片（{image.width}×{image.height}）
+        </p>
+      ) : (
+        <>
       <Section
-        title="Prompt"
+        title={edited ? "修改指令" : "Prompt"}
         action={
           <button
             className="flex items-center gap-1 text-faint hover:text-fg"
@@ -86,11 +98,27 @@ export function ImageInfo({
         </Section>
       )}
 
+      {edited && (
+        <Section title="用到的圖">
+          <div className="flex flex-wrap gap-1.5">
+            {[p.sourceImageId, ...(p.refImageIds ?? [])].map((id, i) => (
+              <div key={`${id}-${i}`} className="relative">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={imageUrl(id!, 160)} alt="" className="size-14 rounded-md border border-line object-cover" />
+                <span className="absolute inset-x-0 bottom-0 rounded-b-md bg-black/70 text-center font-mono text-[9px]">
+                  {i === 0 ? "原圖" : "參考"} {i + 1}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
       <Section title="參數">
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
           <Dt>尺寸</Dt>
           <Dd>
-            {p.width}×{p.height}
+            {image.width}×{image.height}
           </Dd>
           <Dt>Steps / CFG</Dt>
           <Dd>
@@ -141,6 +169,8 @@ export function ImageInfo({
             ))}
           </div>
         </details>
+      )}
+        </>
       )}
     </div>
   );

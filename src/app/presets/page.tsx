@@ -2,12 +2,12 @@
 
 import { useRef, useState } from "react";
 import { Copy, Lock, Plus, Play, Square, Trash2 } from "lucide-react";
-import { api, streamLlm } from "@/lib/client/api";
-import { FAMILY_LABELS, type ModelFamily, type Preset } from "@/lib/shared/types";
+import { api, imageUrl, streamLlm } from "@/lib/client/api";
+import { FAMILY_LABELS, PURPOSE_LABELS, type ModelFamily, type Preset, type PresetPurpose } from "@/lib/shared/types";
 import { useStudio } from "@/components/studio-provider";
 import { Button, Select, inputCls } from "@/components/ui";
 
-type Draft = Pick<Preset, "name" | "family" | "content">;
+type Draft = Pick<Preset, "name" | "family" | "purpose" | "content">;
 
 export default function PresetsPage() {
   const { presets, reloadPresets } = useStudio();
@@ -15,7 +15,7 @@ export default function PresetsPage() {
   const selected = presets.find((p) => p.id === selectedId) ?? presets[0];
 
   const create = async () => {
-    const p = await api.createPreset({ name: "新範本", family: "qwen-image", content: "You are an image prompt writer. Output only the prompt." });
+    const p = await api.createPreset({ name: "新範本", family: "qwen-image", purpose: "generate", content: "You are an image prompt writer. Output only the prompt." });
     await reloadPresets();
     setSelectedId(p.id);
   };
@@ -30,7 +30,10 @@ export default function PresetsPage() {
           </Button>
         </header>
         <div className="flex-1 overflow-y-auto p-2">
-          {presets.map((p) => (
+          {(Object.keys(PURPOSE_LABELS) as PresetPurpose[]).map((purpose) => (
+            <div key={purpose} className="mb-3">
+              <h2 className="px-3 py-1 text-[11px] font-medium tracking-wide text-faint">{PURPOSE_LABELS[purpose]}</h2>
+          {presets.filter((p) => p.purpose === purpose).map((p) => (
             <button
               key={p.id}
               onClick={() => setSelectedId(p.id)}
@@ -43,6 +46,8 @@ export default function PresetsPage() {
               <div className="mt-0.5 text-xs text-faint">{FAMILY_LABELS[p.family]}</div>
             </button>
           ))}
+            </div>
+          ))}
         </div>
       </aside>
 
@@ -54,10 +59,11 @@ export default function PresetsPage() {
 
 function Editor({ preset, onSelect }: { preset: Preset; onSelect: (id: string | undefined) => void }) {
   const { reloadPresets } = useStudio();
-  const [draft, setDraft] = useState<Draft>({ name: preset.name, family: preset.family, content: preset.content });
+  const [draft, setDraft] = useState<Draft>({ name: preset.name, family: preset.family, purpose: preset.purpose, content: preset.content });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
-  const dirty = draft.name !== preset.name || draft.family !== preset.family || draft.content !== preset.content;
+  const dirty =
+    draft.name !== preset.name || draft.family !== preset.family || draft.purpose !== preset.purpose || draft.content !== preset.content;
 
   async function run(fn: () => Promise<Preset | void>) {
     setSaving(true);
@@ -74,7 +80,7 @@ function Editor({ preset, onSelect }: { preset: Preset; onSelect: (id: string | 
   }
 
   const duplicate = () =>
-    run(() => api.createPreset({ name: `${preset.name}（副本）`, family: preset.family, content: preset.content }));
+    run(() => api.createPreset({ name: `${preset.name}（副本）`, family: preset.family, purpose: preset.purpose, content: preset.content }));
 
   return (
         <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
@@ -98,7 +104,21 @@ function Editor({ preset, onSelect }: { preset: Preset; onSelect: (id: string | 
                   className={inputCls}
                 />
               </label>
-              <label className="flex w-64 flex-col gap-1 text-xs text-muted">
+              <label className="flex w-36 flex-col gap-1 text-xs text-muted">
+                用途
+                <Select
+                  value={draft.purpose}
+                  disabled={preset.builtin}
+                  onChange={(e) => setDraft({ ...draft, purpose: e.target.value as PresetPurpose })}
+                >
+                  {Object.entries(PURPOSE_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+              <label className="flex w-60 flex-col gap-1 text-xs text-muted">
                 適用模型
                 <Select
                   value={draft.family}
@@ -132,7 +152,7 @@ function Editor({ preset, onSelect }: { preset: Preset; onSelect: (id: string | 
                 <Button variant="primary" disabled={!dirty || saving} onClick={() => run(() => api.updatePreset(preset.id, draft))}>
                   儲存
                 </Button>
-                <Button variant="ghost" disabled={!dirty} onClick={() => setDraft({ name: preset.name, family: preset.family, content: preset.content })}>
+                <Button variant="ghost" disabled={!dirty} onClick={() => setDraft({ name: preset.name, family: preset.family, purpose: preset.purpose, content: preset.content })}>
                   放棄修改
                 </Button>
                 <Button variant="ghost" onClick={duplicate}>
@@ -161,7 +181,10 @@ function Editor({ preset, onSelect }: { preset: Preset; onSelect: (id: string | 
 
 /** Run the saved preset on a sample idea, to see what it produces before using it. */
 function TryIt({ preset, dirty }: { preset: Preset; dirty: boolean }) {
-  const [idea, setIdea] = useState("一隻在雨中的台北街頭撐傘的柴犬");
+  const { recent } = useStudio();
+  // Edit presets need something to look at: try them on the newest image.
+  const sample = preset.purpose === "edit" ? recent[0] : undefined;
+  const [idea, setIdea] = useState(preset.purpose === "edit" ? "把背景換成下雪的京都街道" : "一隻在雨中的台北街頭撐傘的柴犬");
   const [out, setOut] = useState("");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string>();
@@ -173,7 +196,7 @@ function TryIt({ preset, dirty }: { preset: Preset; dirty: boolean }) {
     setRunning(true);
     ac.current = new AbortController();
     try {
-      await streamLlm("/api/llm/expand", { presetId: preset.id, idea }, { onContent: (t) => setOut((o) => o + t) }, ac.current.signal);
+      await streamLlm("/api/llm/expand", { presetId: preset.id, idea, imageIds: sample ? [sample.id] : undefined }, { onContent: (t) => setOut((o) => o + t) }, ac.current.signal);
     } catch (e) {
       if (!ac.current.signal.aborted) setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -186,6 +209,10 @@ function TryIt({ preset, dirty }: { preset: Preset; dirty: boolean }) {
       <h2 className="mb-2 font-medium">試跑</h2>
       {dirty && <p className="mb-2 text-xs text-faint">試跑用的是已儲存的版本，先儲存才會套用修改。</p>}
       <div className="flex gap-2">
+        {sample && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={imageUrl(sample.id, 160)} alt="" title="用最新的一張圖試跑" className="size-10 shrink-0 rounded-md object-cover" />
+        )}
         <input value={idea} onChange={(e) => setIdea(e.target.value)} className={inputCls} />
         {running ? (
           <Button onClick={() => ac.current?.abort()}>

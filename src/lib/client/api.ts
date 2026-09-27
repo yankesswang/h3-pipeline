@@ -15,6 +15,7 @@ const send = (method: string, body?: unknown): RequestInit => ({
 });
 
 export type PublicSettings = Settings & { llmApiKeySet: boolean };
+export type PresetDraft = Pick<Preset, "name" | "family" | "purpose" | "content">;
 
 export const api = {
   jobs: () => fetch("/api/jobs").then(json<Job[]>),
@@ -30,14 +31,19 @@ export const api = {
     return fetch(`/api/images?${sp}`).then(json<ImageRecord[]>);
   },
   image: (id: string) => fetch(`/api/images/${id}`).then(json<ImageRecord>),
+  tree: (id: string) => fetch(`/api/images/${id}/tree`).then(json<ImageRecord[]>),
+  upload: (files: File[]) => {
+    const form = new FormData();
+    for (const f of files) form.append("file", f);
+    return fetch("/api/images/upload", { method: "POST", body: form }).then(json<ImageRecord[]>);
+  },
   setFavorite: (id: string, favorite: boolean) =>
     fetch(`/api/images/${id}`, send("PATCH", { favorite })).then(json<ImageRecord>),
   deleteImage: (id: string) => fetch(`/api/images/${id}`, send("DELETE")).then(json<void>),
 
   presets: () => fetch("/api/presets").then(json<Preset[]>),
-  createPreset: (p: Pick<Preset, "name" | "family" | "content">) =>
-    fetch("/api/presets", send("POST", p)).then(json<Preset>),
-  updatePreset: (id: string, p: Pick<Preset, "name" | "family" | "content">) =>
+  createPreset: (p: PresetDraft) => fetch("/api/presets", send("POST", p)).then(json<Preset>),
+  updatePreset: (id: string, p: PresetDraft) =>
     fetch(`/api/presets/${id}`, send("PUT", p)).then(json<Preset>),
   deletePreset: (id: string) => fetch(`/api/presets/${id}`, send("DELETE")).then(json<void>),
 
@@ -47,7 +53,8 @@ export const api = {
   status: () => fetch("/api/status").then(json<{ comfy: boolean; llm: boolean; llmModel: string }>),
 };
 
-export const imageUrl = (id: string) => `/api/images/${id}/file`;
+/** Full PNG, or a cached WebP thumbnail when `width` is given. */
+export const imageUrl = (id: string, width?: number) => `/api/images/${id}/file${width ? `?w=${width}` : ""}`;
 
 export interface StreamHandlers {
   onContent: (text: string) => void;
@@ -57,7 +64,7 @@ export interface StreamHandlers {
 /** POST to an LLM route and feed its NDJSON stream to the handlers. Throws on an error line. */
 export async function streamLlm(
   path: "/api/llm/chat" | "/api/llm/expand",
-  body: { presetId: string; messages?: ChatMessage[]; idea?: string },
+  body: { presetId: string; messages?: ChatMessage[]; idea?: string; imageIds?: string[] },
   h: StreamHandlers,
   signal?: AbortSignal,
 ) {
