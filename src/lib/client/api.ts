@@ -50,6 +50,9 @@ export const api = {
   settings: () => fetch("/api/settings").then(json<PublicSettings>),
   saveSettings: (s: Partial<Settings>) => fetch("/api/settings", send("PUT", s)).then(json<PublicSettings>),
   llmModels: () => fetch("/api/llm/models").then(json<{ models: string[]; error?: string }>),
+  samReady: () => fetch("/api/sam").then(json<{ ready: boolean }>),
+  sam: (imageId: string, points: [number, number, 0 | 1][]) =>
+    fetch("/api/sam", send("POST", { imageId, points })).then(json<{ mask: string; score: number }>),
   status: () => fetch("/api/status").then(json<{ comfy: boolean; llm: boolean; llmModel: string }>),
 };
 

@@ -74,7 +74,7 @@ export function ImageInfo({
       ) : (
         <>
       <Section
-        title={edited ? "修改指令" : "Prompt"}
+        title={p.outpaint ? "擴圖" : p.maskId ? "局部修改指令" : edited ? "修改指令" : "Prompt"}
         action={
           <button
             className="flex items-center gap-1 text-faint hover:text-fg"

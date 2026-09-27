@@ -32,9 +32,12 @@ export function lineage(tree: ImageRecord[], id: string): ImageRecord[] {
 }
 
 export function stepLabel(img: ImageRecord) {
+  const p = img.params;
   if (img.tool === "upload") return "上傳的原圖";
   if (img.tool === "qwen21-t2i") return "生成";
-  return img.params.prompt;
+  if (p.outpaint) return p.prompt ? `擴圖：${p.prompt}` : `擴圖到 ${img.width}×${img.height}`;
+  if (p.maskId) return `局部：${p.prompt}`;
+  return p.prompt;
 }
 
 /** Thumbnails of the steps that led to the current image, above the stage. */
@@ -67,7 +70,7 @@ export function Lineage({
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={imageUrl(img.id, 160)} alt="" className="size-7 rounded object-cover" />
-            <span className="max-w-40 truncate">{i === 0 ? stepLabel(img) : img.params.prompt}</span>
+            <span className="max-w-40 truncate">{stepLabel(img)}</span>
           </button>
         </div>
       ))}
@@ -121,7 +124,7 @@ export function VersionTree({
         <span className="min-w-0 flex-1">
           <span className={`line-clamp-2 ${onPath.has(node.id) ? "text-fg" : "text-muted"}`}>
             {node.tool === "upload" && <Upload className="mr-1 inline size-3" />}
-            {depth === 0 ? stepLabel(node) : node.params.prompt}
+            {stepLabel(node)}
           </span>
           <span className="text-[10px] text-faint">{new Date(node.createdAt).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })}</span>
         </span>

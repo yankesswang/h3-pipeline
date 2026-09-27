@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { AlertTriangle, ImageIcon, Info, Loader2, Pencil, X } from "lucide-react";
 import { api, imageUrl } from "@/lib/client/api";
 import type { ImageRecord, Job } from "@/lib/shared/types";
@@ -15,6 +16,7 @@ export function Viewer({
   onToggleInfo,
   editing,
   onEdit,
+  stage,
 }: {
   image?: ImageRecord;
   job?: Job;
@@ -24,6 +26,8 @@ export function Viewer({
   /** This image is the current edit target. */
   editing: boolean;
   onEdit: (img: ImageRecord) => void;
+  /** Replaces the plain image while it is being edited (selection tools, outpaint frame). */
+  stage?: ReactNode;
 }) {
   if (job && !image) return <JobStage job={job} queuePosition={queuePosition} />;
 
@@ -40,13 +44,15 @@ export function Viewer({
 
   return (
     <div className="group relative flex h-full items-center justify-center">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        key={image.id}
-        src={imageUrl(image.id)}
-        alt={image.params.prompt}
-        className="checker max-h-full max-w-full rounded-lg object-contain shadow-2xl shadow-black/50"
-      />
+      {stage ?? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={image.id}
+          src={imageUrl(image.id)}
+          alt={image.params.prompt}
+          className="checker max-h-full max-w-full rounded-lg object-contain shadow-2xl shadow-black/50"
+        />
+      )}
       <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-xl bg-black/60 p-1 backdrop-blur">
         {editing ? (
           <span className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-accent">

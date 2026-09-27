@@ -7,6 +7,8 @@ import { buildPrompt, type Tool } from "@/lib/tools/types";
 import { comfy, type ComfyMessage } from "./comfy";
 import { afterGenerate, beforeGenerate } from "./gpu";
 import { pngSize } from "./images";
+import { maskPath } from "./masks";
+import { DEFAULT_OUTPAINT_PROMPT, prepareMasked, prepareOutpaint, stitchMasked, stitchOutpaint, type Rect } from "./regions";
 import { getImage, imagePath, insertImage } from "./repo";
 
 // One GPU, so jobs run strictly one at a time, in order.
@@ -110,14 +112,19 @@ async function run(job: Job) {
   update(job, { status: "running", stage: "準備 GPU", progress: 0 });
   try {
     await beforeGenerate();
-    const images = await uploadInputs(job.params);
-    const values = { ...job.params, resolution: editResolution(job.params) };
+    const region = await prepareRegion(job.params);
+    const images = await uploadInputs(job.params, region?.image);
+    const values = {
+      ...job.params,
+      prompt: region?.prompt ?? job.params.prompt,
+      resolution: editResolution(job.params),
+    };
     const promptId = await comfy.submit(buildPrompt(tool, values, images));
     q.comfyPromptIds.set(job.id, promptId);
     update(job, { stage: "排入 ComfyUI" });
     const outcome = await waitFor(job, promptId);
     if (outcome === "interrupted") return update(job, { status: "cancelled", stage: undefined });
-    const image = await collect(job, tool, promptId);
+    const image = await collect(job, tool, promptId, region?.finish);
     update(job, { status: "done", progress: 1, stage: undefined, imageId: image.id });
   } catch (e) {
     update(job, { status: "error", stage: undefined, error: e instanceof Error ? e.message : String(e) });
@@ -127,17 +134,43 @@ async function run(job: Job) {
   }
 }
 
-/** Send the source and reference images to ComfyUI's input folder. */
-async function uploadInputs(p: GenerateParams): Promise<string[]> {
+/**
+ * Local edits and outpainting swap the source for a prepared image (a crop, or
+ * a bigger canvas) and stitch the model's output back into the original afterwards.
+ */
+async function prepareRegion(p: GenerateParams) {
+  if (!p.sourceImageId || (!p.maskId && !p.outpaint)) return undefined;
+  const source = fs.readFileSync(imagePath(p.sourceImageId)!);
+  if (p.outpaint) {
+    const pads = p.outpaint;
+    const { canvas, width, height } = await prepareOutpaint(source, pads);
+    const extra = p.prompt.trim();
+    return {
+      image: canvas,
+      prompt: extra ? `${DEFAULT_OUTPAINT_PROMPT} ${extra}` : DEFAULT_OUTPAINT_PROMPT,
+      finish: (out: Buffer) => stitchOutpaint(source, out, pads, width, height),
+    };
+  }
+  const { crop, rect, mask } = await prepareMasked(source, fs.readFileSync(maskPath(p.maskId!)));
+  return {
+    image: crop,
+    prompt: undefined,
+    finish: (out: Buffer) => stitchMasked(source, out, rect as Rect, mask),
+  };
+}
+
+/** Send the source (or its prepared stand-in) and reference images to ComfyUI's input folder. */
+async function uploadInputs(p: GenerateParams, preparedSource?: Buffer): Promise<string[]> {
   if (!p.sourceImageId) return [];
-  const ids = [p.sourceImageId, ...(p.refImageIds ?? [])];
-  return Promise.all(
-    ids.map((id) => {
-      const file = imagePath(id);
-      if (!file) throw new Error(`找不到圖片 ${id}`);
-      return comfy.upload(fs.readFileSync(file), `${id}.png`);
-    }),
-  );
+  const read = (id: string) => {
+    const file = imagePath(id);
+    if (!file) throw new Error(`找不到圖片 ${id}`);
+    return fs.readFileSync(file);
+  };
+  return Promise.all([
+    comfy.upload(preparedSource ?? read(p.sourceImageId), preparedSource ? `${p.sourceImageId}-region.png` : `${p.sourceImageId}.png`),
+    ...(p.refImageIds ?? []).map((id) => comfy.upload(read(id), `${id}.png`)),
+  ]);
 }
 
 /** 0 keeps every image at its own size (uploads are already capped at 4 MP). */
@@ -187,11 +220,15 @@ function waitFor(job: Job, promptId: string): Promise<"success" | "interrupted">
   });
 }
 
-async function collect(job: Job, tool: Tool, promptId: string) {
+async function collect(job: Job, tool: Tool, promptId: string, finish?: (out: Buffer) => Promise<Buffer>) {
   const h = await comfy.history(promptId);
   const ref = h?.outputs?.[tool.outputNode]?.images?.[0];
   if (!ref) throw new Error("ComfyUI 沒有回傳圖片");
-  const png = await comfy.fetchImage(ref);
+  let png = await comfy.fetchImage(ref);
+  if (finish) {
+    update(job, { stage: "貼回原圖" });
+    png = await finish(png);
+  }
   const { width, height } = pngSize(png);
   const image = insertImage(
     {

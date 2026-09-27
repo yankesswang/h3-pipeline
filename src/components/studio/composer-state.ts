@@ -2,11 +2,23 @@ import type { AspectId } from "@/lib/shared/sizes";
 import { randomSeed, sizeFor } from "@/lib/shared/sizes";
 import type { GenerateParams, ImageRecord, PresetPurpose, PromptOrigin } from "@/lib/shared/types";
 
+export interface Pads {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+export const NO_PADS: Pads = { left: 0, top: 0, right: 0, bottom: 0 };
+export const hasPads = (p?: Pads) => !!p && p.left + p.top + p.right + p.bottom > 0;
+
 export interface EditTarget {
   /** The image being changed: <image1>. */
   source: ImageRecord;
   /** Reference images: <image2> onwards. */
   refs: ImageRecord[];
+  /** Set while outpainting: how far to grow each side, in source pixels. */
+  outpaint?: Pads;
 }
 
 export const MAX_REFS = 9;
@@ -42,7 +54,10 @@ export const initialComposer: ComposerState = {
 export const purposeOf = (s: ComposerState): PresetPurpose => (s.edit ? "edit" : "generate");
 
 export function toParams(s: ComposerState): GenerateParams {
-  const size = s.edit ? { width: s.edit.source.width, height: s.edit.source.height } : sizeFor(s.aspect, s.megapixels);
+  const o = s.edit?.outpaint ?? NO_PADS;
+  const size = s.edit
+    ? { width: s.edit.source.width + o.left + o.right, height: s.edit.source.height + o.top + o.bottom }
+    : sizeFor(s.aspect, s.megapixels);
   return {
     prompt: s.prompt.trim(),
     negativePrompt: s.negativePrompt,
@@ -51,6 +66,7 @@ export function toParams(s: ComposerState): GenerateParams {
     cfg: s.cfg,
     seed: s.seedLocked ? s.seed : randomSeed(),
     ...(s.edit ? { sourceImageId: s.edit.source.id, refImageIds: s.edit.refs.map((r) => r.id) } : {}),
+    ...(s.edit && hasPads(s.edit.outpaint) ? { outpaint: s.edit.outpaint } : {}),
   };
 }
 
@@ -93,9 +109,24 @@ export function fromImage(
     count: 1,
     origin: img.origin,
     edit: source
-      ? { source, refs: (p.refImageIds ?? []).map(lookup).filter((r): r is ImageRecord => !!r) }
+      ? {
+          source,
+          refs: (p.refImageIds ?? []).map(lookup).filter((r): r is ImageRecord => !!r),
+          outpaint: p.outpaint,
+        }
       : undefined,
   };
+}
+
+/** Pads that grow the image to an aspect ratio, split evenly on both sides. */
+export function padsForAspect(w: number, h: number, ratio: number): Pads {
+  const snap = (v: number) => Math.round(v / 16) * 16;
+  if (w / h < ratio) {
+    const extra = snap(h * ratio - w);
+    return { left: snap(extra / 2), right: extra - snap(extra / 2), top: 0, bottom: 0 };
+  }
+  const extra = snap(w / ratio - h);
+  return { top: snap(extra / 2), bottom: extra - snap(extra / 2), left: 0, right: 0 };
 }
 
 /** Start editing `img`, keeping the rest of the composer (quality, count...). */

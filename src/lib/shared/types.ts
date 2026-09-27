@@ -39,6 +39,10 @@ export interface GenerateParams {
   sourceImageId?: string;
   /** Editing: extra reference images, <image2> onwards. */
   refImageIds?: string[];
+  /** Editing: only change the selected area (a saved mask, white = change). */
+  maskId?: string;
+  /** Editing: grow the canvas by these many pixels and fill the new area. */
+  outpaint?: { left: number; top: number; right: number; bottom: number };
 }
 
 export type ToolId = "qwen21-t2i" | "qwen21-edit";
@@ -56,6 +60,8 @@ export interface PromptOrigin {
 export interface GenerateRequest {
   tool?: ToolId;
   params: GenerateParams;
+  /** A selection drawn in the browser, as a PNG data URL at the source image's size. Saved as params.maskId. */
+  mask?: string;
   count: number;
   origin?: PromptOrigin;
 }

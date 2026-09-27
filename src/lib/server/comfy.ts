@@ -115,7 +115,8 @@ class ComfyClient {
 
   async ping(): Promise<boolean> {
     try {
-      await this.req("/system_stats", { signal: AbortSignal.timeout(2000) });
+      // Generous: ComfyUI answers slowly while it is busy sampling.
+      await this.req("/system_stats", { signal: AbortSignal.timeout(6000) });
       return true;
     } catch {
       return false;

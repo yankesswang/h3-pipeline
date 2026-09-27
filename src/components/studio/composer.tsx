@@ -16,6 +16,7 @@ export function Composer({
   setPresetId,
   onGenerate,
   onUpload,
+  region,
   busy,
 }: {
   state: ComposerState;
@@ -25,6 +26,8 @@ export function Composer({
   onGenerate: () => void;
   /** Upload outside images; in edit mode they become references, otherwise the first becomes the edit target. */
   onUpload: (files: File[]) => void;
+  /** Edit mode: what the instruction applies to. */
+  region: "whole" | "mask" | "outpaint";
   busy: boolean;
 }) {
   const { presets, status } = useStudio();
@@ -36,7 +39,12 @@ export function Composer({
   const fileRef = useRef<HTMLInputElement>(null);
   const set = (patch: Partial<ComposerState>) => setState((s) => ({ ...s, ...patch }));
   const editing = !!state.edit;
-  const { width, height } = editing ? state.edit!.source : sizeFor(state.aspect, state.megapixels);
+  const o = state.edit?.outpaint;
+  const { width, height } = editing
+    ? { width: state.edit!.source.width + (o ? o.left + o.right : 0), height: state.edit!.source.height + (o ? o.top + o.bottom : 0) }
+    : sizeFor(state.aspect, state.megapixels);
+  const outpainting = editing && region === "outpaint";
+  const canRun = !!state.prompt.trim() || (outpainting && !!o && o.left + o.top + o.right + o.bottom > 0);
   const purpose = purposeOf(state);
   const preset = presets.find((p) => p.id === presetId);
 
@@ -144,7 +152,11 @@ export function Composer({
         }}
         rows={editing ? 3 : 4}
         placeholder={
-          editing
+          outpainting
+            ? "（選填）描述延伸出去的部分要有什麼，例如「左邊多一棵櫻花樹」。留空就讓模型自然延伸。"
+            : region === "mask"
+              ? "選取範圍要改成什麼？例如「換成一隻橘貓」「移除這個人」。（Ctrl+Enter 送出）"
+              : editing
             ? "要怎麼改？例如「把天空換成夕陽」「讓她穿上 <image2> 的外套」。用中文也可以，按「擴寫」讓 LLM 看圖寫成精確指令。（Ctrl+Enter 送出）"
             : "想要什麼畫面？用任何語言描述，按「擴寫」讓 LLM 寫成完整 prompt，或直接生成。也可以把圖片拖進來修改。（Ctrl+Enter 生成）"
         }
@@ -182,7 +194,9 @@ export function Composer({
         <div className="mx-1 h-5 w-px bg-line" />
 
         {editing ? (
-          <span className="text-xs text-faint">輸出尺寸跟原圖一樣</span>
+          <span className={`rounded-md px-2 py-1 text-xs ${region === "whole" ? "text-faint" : "bg-accent-strong/20 text-accent"}`}>
+            {region === "mask" ? "只改選取範圍" : region === "outpaint" ? "擴圖" : "整張修改 · 尺寸跟原圖一樣"}
+          </span>
         ) : (
           <>
             <div className="flex items-center">
@@ -235,9 +249,9 @@ export function Composer({
               +
             </button>
           </div>
-          <Button variant="primary" onClick={onGenerate} disabled={!state.prompt.trim() || expanding} className="px-5">
+          <Button variant="primary" onClick={onGenerate} disabled={!canRun || expanding} className="px-5">
             {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-            {editing ? "修改" : "生成"}
+            {outpainting ? "擴圖" : editing ? "修改" : "生成"}
           </Button>
         </div>
       </div>

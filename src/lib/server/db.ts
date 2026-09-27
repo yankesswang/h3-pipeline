@@ -6,10 +6,12 @@ import { BUILTIN_PRESETS } from "./presets-builtin";
 export const DATA_DIR = process.env.STUDIO_DATA_DIR ?? path.join(process.cwd(), "data");
 export const IMAGE_DIR = path.join(DATA_DIR, "images");
 export const THUMB_DIR = path.join(DATA_DIR, "thumbs");
+export const MASK_DIR = path.join(DATA_DIR, "masks");
 
 function open() {
   fs.mkdirSync(IMAGE_DIR, { recursive: true });
   fs.mkdirSync(THUMB_DIR, { recursive: true });
+  fs.mkdirSync(MASK_DIR, { recursive: true });
   const db = new Database(path.join(DATA_DIR, "studio.db"));
   db.pragma("journal_mode = WAL");
   db.exec(`

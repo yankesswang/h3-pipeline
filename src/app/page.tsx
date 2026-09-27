@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ImageDown, PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import { api } from "@/lib/client/api";
+import { clearMask, createMask, exportMask, invertMask, loadMask, maskIsEmpty } from "@/lib/client/mask";
 import type { ChatMessage, ImageRecord, PresetPurpose } from "@/lib/shared/types";
 import { ImageInfo } from "@/components/image-info";
 import { useStudio } from "@/components/studio-provider";
@@ -12,12 +13,16 @@ import {
   addRefs,
   editImageIds,
   fromImage,
+  hasPads,
   initialComposer,
+  NO_PADS,
   purposeOf,
   startEdit,
   toParams,
   type ComposerState,
 } from "@/components/studio/composer-state";
+import { EditStage, type SamPoint, type Tool } from "@/components/studio/edit-stage";
+import { EditToolbar } from "@/components/studio/edit-toolbar";
 import { Strip } from "@/components/studio/strip";
 import { Lineage, useTree, VersionTree } from "@/components/studio/version-tree";
 import { Viewer, type Selection } from "@/components/studio/viewer";
@@ -36,6 +41,16 @@ export default function StudioPage() {
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const [dragging, setDragging] = useState(false);
+  // Selection tools. The mask belongs to one source image; editing another starts a fresh one.
+  const [tool, setToolState] = useState<Tool>("whole");
+  const [brushSize, setBrushSize] = useState(48);
+  const maskRef = useRef<{ id: string; canvas: HTMLCanvasElement } | null>(null);
+  const [maskVersion, setMaskVersion] = useState(0);
+  const [maskOwner, setMaskOwner] = useState<string | null>(null);
+  const [sam, setSam] = useState<{ id: string; points: SamPoint[] }>({ id: "", points: [] });
+  const [samBusy, setSamBusy] = useState(false);
+  const [samError, setSamError] = useState<string>();
+  const [samReady, setSamReady] = useState(false);
   // Images reached through the version tree may be older than `recent`.
   const [known, setKnown] = useState<Map<string, ImageRecord>>(new Map());
 
@@ -123,6 +138,58 @@ export default function StudioPage() {
       ? jobs.filter((j) => (j.status === "queued" || j.status === "running") && j.createdAt < selJob.createdAt).length
       : undefined;
   const tree = useTree(shownImage?.id);
+  const source = composer.edit?.source;
+  const stageEditing = !!shownImage && source?.id === shownImage.id;
+  const hasMask = !!source && maskOwner === source.id;
+  const region: "whole" | "mask" | "outpaint" = tool === "outpaint" ? "outpaint" : hasMask ? "mask" : "whole";
+
+  function maskFor(img: { id: string; width: number; height: number }) {
+    if (maskRef.current?.id !== img.id) maskRef.current = { id: img.id, canvas: createMask(img.width, img.height) };
+    return maskRef.current.canvas;
+  }
+  const samPoints = source && sam.id === source.id ? sam.points : [];
+
+  function resetSelection() {
+    if (maskRef.current) clearMask(maskRef.current.canvas);
+    setMaskOwner(null);
+    setSam({ id: "", points: [] });
+    setMaskVersion((v) => v + 1);
+  }
+
+  function setTool(t: Tool) {
+    if (t === "whole") resetSelection();
+    setToolState(t);
+    setComposer((s) =>
+      s.edit ? { ...s, edit: { ...s.edit, outpaint: t === "outpaint" ? (s.edit.outpaint ?? NO_PADS) : undefined } } : s,
+    );
+  }
+
+  async function samClick(point: SamPoint) {
+    if (!source) return;
+    const points = [...samPoints, point];
+    setSam({ id: source.id, points });
+    setSamBusy(true);
+    setSamError(undefined);
+    try {
+      const { mask } = await api.sam(source.id, points);
+      await loadMask(maskFor(source), mask);
+      setMaskOwner(source.id);
+      setMaskVersion((v) => v + 1);
+    } catch (e) {
+      setSamError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSamBusy(false);
+    }
+  }
+
+  // Click-to-select needs a one-time model download; check until it is there.
+  useEffect(() => {
+    if (samReady) return;
+    const check = () => api.samReady().then((r) => r.ready && setSamReady(true), () => {});
+    void check();
+    const t = setInterval(check, 15_000);
+    return () => clearInterval(t);
+  }, [samReady]);
 
   // Iterative editing: when a single edit of the current target finishes, the
   // result becomes the next target, like continuing a conversation.
@@ -137,7 +204,7 @@ export default function StudioPage() {
           remember([img]);
           setComposer((s) =>
             s.edit && s.edit.source.id === ev.job.params.sourceImageId
-              ? { ...s, prompt: "", origin: undefined, edit: { ...s.edit, source: img } }
+              ? { ...s, prompt: "", origin: undefined, edit: { ...s.edit, source: img, outpaint: s.edit.outpaint && NO_PADS } }
               : s,
           );
         });
@@ -148,11 +215,19 @@ export default function StudioPage() {
   const generate = useCallback(
     async (override?: { prompt: string; chat: ChatMessage[] }) => {
       const state = override ? { ...composer, prompt: override.prompt, origin: originForChat(override.chat) } : composer;
-      if (!state.prompt.trim()) return;
+      const outpaint = state.edit && hasPads(state.edit.outpaint);
+      if (!state.prompt.trim() && !outpaint) return;
+      const mask = !outpaint && state.edit && maskOwner === state.edit.source.id ? maskRef.current?.canvas : undefined;
+      if (mask && maskIsEmpty(mask)) return setError("選取範圍是空的，請先塗或點選要改的地方，或切回「整張」。");
       setError(undefined);
       setSubmitting(true);
       try {
-        const created = await api.generate({ params: toParams(state), count: state.count, origin: state.origin });
+        const created = await api.generate({
+          params: toParams(state),
+          count: state.count,
+          origin: state.origin,
+          mask: mask ? exportMask(mask) : undefined,
+        });
         setSelection({ kind: "job", id: created[0].id });
         followJob.current = state.edit && created.length === 1 ? created[0].id : null;
         setPanel(null);
@@ -163,7 +238,7 @@ export default function StudioPage() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [composer, presetId, presets],
+    [composer, presetId, presets, maskOwner],
   );
 
   function originForChat(chat: ChatMessage[]) {
@@ -259,6 +334,28 @@ export default function StudioPage() {
         {shownImage && (
           <Lineage tree={tree} currentId={shownImage.id} onSelect={selectImage} onShowTree={() => setPanel("tree")} />
         )}
+        {stageEditing && source && (
+          <EditToolbar
+            tool={tool}
+            setTool={setTool}
+            brushSize={brushSize}
+            setBrushSize={setBrushSize}
+            hasMask={hasMask}
+            onInvert={() => {
+              invertMask(maskFor(source));
+              setMaskOwner(maskIsEmpty(maskFor(source)) ? null : source.id);
+              setSam({ id: "", points: [] });
+              setMaskVersion((v) => v + 1);
+            }}
+            onClear={resetSelection}
+            samReady={samReady}
+            samBusy={samBusy}
+            samError={samError}
+            onPads={(p) => setComposer((s) => (s.edit ? { ...s, edit: { ...s.edit, outpaint: p } } : s))}
+            width={source.width}
+            height={source.height}
+          />
+        )}
         <div className="flex min-h-0 flex-1 gap-3">
           <div className="relative min-w-0 flex-1">
             <Viewer
@@ -267,8 +364,28 @@ export default function StudioPage() {
               queuePosition={queuePosition}
               showInfo={panel !== null}
               onToggleInfo={() => setPanel((p) => (p ? null : "info"))}
-              editing={!!shownImage && composer.edit?.source.id === shownImage.id}
+              editing={stageEditing}
               onEdit={edit}
+              stage={
+                stageEditing && source ? (
+                  <EditStage
+                    image={source}
+                    tool={tool}
+                    brushSize={brushSize}
+                    mask={maskFor(source)}
+                    maskVersion={maskVersion}
+                    onStroke={() => {
+                      const m = maskFor(source);
+                      setMaskOwner(maskIsEmpty(m) ? null : source.id);
+                    }}
+                    samPoints={samPoints}
+                    onSamClick={samClick}
+                    pads={composer.edit?.outpaint ?? NO_PADS}
+                    onPads={(p) => setComposer((s) => (s.edit ? { ...s, edit: { ...s.edit, outpaint: p } } : s))}
+                    busy={samBusy}
+                  />
+                ) : undefined
+              }
             />
             <IconButton
               label={showChat ? "收起 Prompt 助手" : "打開 Prompt 助手"}
@@ -332,6 +449,7 @@ export default function StudioPage() {
           setPresetId={setPresetId}
           onGenerate={() => generate()}
           onUpload={upload}
+          region={region}
           busy={submitting}
         />
       </div>
