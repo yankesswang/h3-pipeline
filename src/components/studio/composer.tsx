@@ -3,12 +3,13 @@
 import { useRef, useState } from "react";
 import { Clapperboard, Dices, Image as ImageIcon, ImagePlus, Lock, Loader2, Plus, SlidersHorizontal, Square, Undo2, Upload, Wand2, X } from "lucide-react";
 import { imageUrl, streamLlm } from "@/lib/client/api";
-import { ASPECTS, MEGAPIXELS, QUALITIES, randomSeed, sizeFor } from "@/lib/shared/sizes";
-import type { ImageRecord } from "@/lib/shared/types";
+import { ASPECTS, CUSTOM_SIZE, MEGAPIXELS, QUALITIES, randomSeed, snapSize } from "@/lib/shared/sizes";
+import type { ImageRecord, PromptOrigin } from "@/lib/shared/types";
 import { Button, Chip, IconButton, PresetSelect, inputCls } from "@/components/ui";
 import { useStudio } from "@/components/studio-provider";
-import { addRefs, editImageIds, MAX_REFS, purposeOf, setMode, videoDims, type ComposerState } from "./composer-state";
-import { framesFor } from "@/lib/tools/video";
+import { addRefs, editImageIds, imageSize, initialComposer, videoContext, MAX_REFS, purposeOf, setMode, videoDims, type ComposerState } from "./composer-state";
+import { framesFor, VIDEO_SPEEDS, videoEstimate } from "@/lib/tools/video";
+import { SamplerRows, VideoQualityChips, VideoStepRows } from "./sampler-fields";
 import { LoraPicker } from "./lora-picker";
 
 export function Composer({
@@ -20,17 +21,23 @@ export function Composer({
   onUpload,
   region,
   busy,
+  autoExpand,
+  setAutoExpand,
 }: {
   state: ComposerState;
   setState: (fn: (s: ComposerState) => ComposerState) => void;
   presetId: string;
   setPresetId: (id: string) => void;
-  onGenerate: () => void;
+  /** With an override, generate from this prompt (just written by the LLM) instead of the composer's. */
+  onGenerate: (override?: { prompt: string; origin: PromptOrigin }) => void;
   /** Upload outside images; in edit mode they become references, otherwise the first becomes the edit target. */
   onUpload: (files: File[]) => void;
   /** Edit mode: what the instruction applies to. */
   region: "whole" | "mask" | "outpaint";
   busy: boolean;
+  /** Run the typed text through the LLM before generating. */
+  autoExpand: boolean;
+  setAutoExpand: (on: boolean) => void;
 }) {
   const { presets, status } = useStudio();
   const [advanced, setAdvanced] = useState(false);
@@ -47,14 +54,19 @@ export function Composer({
     ? videoDims(state)
     : editing
       ? { width: state.edit!.source.width + (o ? o.left + o.right : 0), height: state.edit!.source.height + (o ? o.top + o.bottom : 0) }
-      : sizeFor(state.aspect, state.megapixels);
+      : imageSize(state);
+  const setVideo = (patch: Partial<ComposerState["video"]>) => setState((s) => ({ ...s, video: { ...s.video, ...patch } }));
+  const aspectWH = ASPECTS.find((a) => a.id === state.aspect) ?? ASPECTS[0];
   const outpainting = editing && region === "outpaint";
   const canRun = !!state.prompt.trim() || (outpainting && !!o && o.left + o.top + o.right + o.bottom > 0);
   const frames = framesFor(state.video.seconds);
   const purpose = purposeOf(state);
   const preset = presets.find((p) => p.id === presetId);
+  // A prompt the LLM already wrote (expanded, from the assistant, or reused) is not expanded again.
+  const willExpand = autoExpand && !state.origin && !!state.prompt.trim() && !!preset;
 
-  async function expand() {
+  /** Returns the finished prompt, or nothing when it failed or was stopped. */
+  async function expand(): Promise<{ prompt: string; origin: PromptOrigin } | undefined> {
     const idea = state.origin?.idea && !state.prompt.trim() ? state.origin.idea : state.prompt.trim();
     if (!idea || !preset) return;
     setError(undefined);
@@ -66,11 +78,11 @@ export function Composer({
     try {
       await streamLlm(
         "/api/llm/expand",
-        { presetId, idea, imageIds: editImageIds(state) },
+        { presetId, idea, imageIds: editImageIds(state), video: videoContext(state) },
         { onContent: (t) => set({ prompt: (out += t).trimStart() }) },
         ac.signal,
       );
-      set({
+      const result = {
         prompt: out.trim(),
         origin: {
           idea,
@@ -79,7 +91,9 @@ export function Composer({
           systemPrompt: preset.content,
           llmModel: status?.llmModel,
         },
-      });
+      };
+      set(result);
+      return result.prompt ? result : undefined;
     } catch (e) {
       if (!ac.signal.aborted) {
         setError(e instanceof Error ? e.message : String(e));
@@ -89,6 +103,13 @@ export function Composer({
       setExpanding(false);
       abortRef.current = null;
     }
+  }
+
+  /** Generate, expanding the text with the LLM first when auto expand is on. */
+  async function run() {
+    if (!willExpand) return onGenerate();
+    const result = await expand();
+    if (result) onGenerate(result);
   }
 
   /** Put "<imageN>" at the cursor, so instructions can point at a specific image. */
@@ -112,7 +133,7 @@ export function Composer({
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept="image/jpeg,image/png,image/webp"
         multiple
         hidden
         onChange={(e) => {
@@ -161,7 +182,7 @@ export function Composer({
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
-            onGenerate();
+            if (!expanding) run();
           }
         }}
         rows={editing || video ? 3 : 4}
@@ -225,6 +246,20 @@ export function Composer({
             onChange={setPresetId}
             className="!border-0 !bg-transparent !py-1 text-xs"
           />
+          <label
+            className={`flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs transition ${
+              autoExpand ? "text-accent" : "text-muted hover:text-fg"
+            }`}
+            title="開啟後，按「生成」會先用 LLM 把你的描述擴寫成完整 prompt 再生成；LLM 已寫好的 prompt 不會再擴寫"
+          >
+            <input
+              type="checkbox"
+              checked={autoExpand}
+              onChange={(e) => setAutoExpand(e.target.checked)}
+              className="accent-accent-strong"
+            />
+            自動擴寫
+          </label>
         </div>
 
         <div className="mx-1 h-5 w-px bg-line" />
@@ -253,20 +288,11 @@ export function Composer({
               />
               <span className="w-12 text-fg tabular-nums">{(frames / 24).toFixed(1)} 秒</span>
             </label>
-            <div className="flex items-center">
-              {[
-                { mp: 0.4, label: "快速" },
-                { mp: 0.98, label: "768p" },
-              ].map((q) => (
-                <Chip
-                  key={q.mp}
-                  on={state.video.megapixels === q.mp}
-                  onClick={() => setState((s) => ({ ...s, video: { ...s.video, megapixels: q.mp } }))}
-                >
-                  {q.label}
-                </Chip>
-              ))}
-            </div>
+            <VideoQualityChips
+              megapixels={state.video.megapixels}
+              aspect={state.video.first ? [state.video.first.width, state.video.first.height] : [aspectWH.w, aspectWH.h]}
+              onChange={(megapixels) => setVideo({ megapixels })}
+            />
           </>
         ) : editing ? (
           <span className={`rounded-md px-2 py-1 text-xs ${region === "whole" ? "text-faint" : "bg-accent-strong/20 text-accent"}`}>
@@ -274,20 +300,32 @@ export function Composer({
           </span>
         ) : (
           <>
-            <div className="flex items-center">
-              {ASPECTS.map((a) => (
-                <Chip key={a.id} on={state.aspect === a.id} onClick={() => set({ aspect: a.id })}>
-                  {a.id}
-                </Chip>
-              ))}
-            </div>
-            <div className="flex items-center">
-              {MEGAPIXELS.map((m) => (
-                <Chip key={m.id} on={state.megapixels === m.id} onClick={() => set({ megapixels: m.id })}>
-                  {m.label}
-                </Chip>
-              ))}
-            </div>
+            {state.customSize ? (
+              <CustomSize size={state.customSize} onChange={(customSize) => set({ customSize })} />
+            ) : (
+              <>
+                <div className="flex items-center">
+                  {ASPECTS.map((a) => (
+                    <Chip key={a.id} on={state.aspect === a.id} onClick={() => set({ aspect: a.id })}>
+                      {a.id}
+                    </Chip>
+                  ))}
+                </div>
+                <div className="flex items-center">
+                  {MEGAPIXELS.map((m) => (
+                    <Chip key={m.id} on={state.megapixels === m.id} onClick={() => set({ megapixels: m.id })}>
+                      {m.label}
+                    </Chip>
+                  ))}
+                </div>
+              </>
+            )}
+            <Chip
+              on={!!state.customSize}
+              onClick={() => set({ customSize: state.customSize ? null : { width, height } })}
+            >
+              {state.customSize ? "改回比例" : "自訂尺寸"}
+            </Chip>
           </>
         )}
 
@@ -318,7 +356,9 @@ export function Composer({
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs text-faint tabular-nums">
             {width}×{height}
-            {video ? ` · 約 ${Math.max(1, Math.round((frames / 73) * (state.video.megapixels > 0.5 ? 2.5 : 1) * 50 / 10) * 10)} 秒` : !quality && ` · ${state.steps} steps`}
+            {video
+              ? ` · 約 ${videoEstimate(state.video.seconds, state.video.megapixels, state.video.steps)} 秒`
+              : !quality && ` · ${state.steps} steps`}
           </span>
           <div className="flex items-center rounded-lg border border-line text-xs">
             <button className="px-2 py-1 text-muted hover:text-fg" onClick={() => set({ count: Math.max(1, state.count - 1) })}>
@@ -331,32 +371,39 @@ export function Composer({
               +
             </button>
           </div>
-          <Button variant="primary" onClick={onGenerate} disabled={!canRun || expanding} className="px-5">
-            {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+          <Button
+            variant="primary"
+            onClick={run}
+            disabled={!canRun || expanding}
+            className="px-5"
+            title={willExpand ? "先用 LLM 擴寫，再生成" : undefined}
+          >
+            {busy || expanding ? <Loader2 className="size-4 animate-spin" /> : willExpand ? <Wand2 className="size-4" /> : null}
+            {willExpand ? "擴寫並" : ""}
             {video ? "生成影片" : outpainting ? "擴圖" : editing ? "修改" : "生成"}
           </Button>
         </div>
       </div>
 
       {advanced && (
-        <div className="mt-3 grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-muted">
+        <div className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 border-t md:gap-x-4 border-line pt-3 text-xs text-muted">
           {!video && (
             <>
           <label>Steps</label>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <input
               type="range"
               min={4}
               max={80}
               value={state.steps}
               onChange={(e) => set({ steps: Number(e.target.value) })}
-              className="w-60 accent-accent-strong"
+              className="w-32 accent-accent-strong sm:w-60"
             />
             <span className="tabular-nums text-fg">{state.steps}</span>
             <span className="text-faint">官方建議 40–50</span>
           </div>
           <label>CFG</label>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <input
               type="range"
               min={1}
@@ -364,20 +411,59 @@ export function Composer({
               step={0.5}
               value={state.cfg}
               onChange={(e) => set({ cfg: Number(e.target.value) })}
-              className="w-60 accent-accent-strong"
+              className="w-32 accent-accent-strong sm:w-60"
             />
             <span className="tabular-nums text-fg">{state.cfg}</span>
             <span className="text-faint">保持 1；要用負面 prompt 才調高（會變慢一倍）</span>
           </div>
+          <SamplerRows
+            sampler={state.sampler}
+            scheduler={state.scheduler}
+            defaults={initialComposer}
+            hint="官方：euler + simple"
+            onChange={set}
+          />
+          {editing && region !== "outpaint" && (
+            <>
+              <label>重繪強度</label>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <input
+                  type="range"
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  value={state.denoise}
+                  onChange={(e) => set({ denoise: Number(e.target.value) })}
+                  className="w-32 accent-accent-strong sm:w-60"
+                />
+                <span className="tabular-nums text-fg">{state.denoise.toFixed(2)}</span>
+                <span className="text-faint">1 = 照指令完整重畫；調低會保留更多原圖的構圖和細節</span>
+              </div>
+            </>
+          )}
+            </>
+          )}
+          {video && (
+            <>
+              <VideoStepRows speed={state.video.speed} steps={state.video.steps} onChange={setVideo} />
+              {!VIDEO_SPEEDS[state.video.speed].adapter && (
+                <SamplerRows
+                  sampler={state.video.sampler}
+                  scheduler={state.video.scheduler}
+                  defaults={initialComposer.video}
+                  hint="官方：res_multistep + simple"
+                  onChange={setVideo}
+                />
+              )}
             </>
           )}
           <label>Seed</label>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <input
               type="number"
               value={state.seed}
               onChange={(e) => set({ seed: Number(e.target.value), seedLocked: true })}
-              className={`${inputCls} !w-48 !py-1 font-mono text-xs`}
+              className={`${inputCls} !w-32 sm:!w-48 !py-1 font-mono text-xs`}
             />
             <IconButton label="換一個 seed" onClick={() => set({ seed: randomSeed() })}>
               <Dices className="size-4" />
@@ -406,6 +492,42 @@ export function Composer({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Exact width × height; typed values snap to a multiple of 32 when the field is left. */
+function CustomSize({ size, onChange }: { size: { width: number; height: number }; onChange: (s: { width: number; height: number }) => void }) {
+  const field = (key: "width" | "height") => (
+    <input
+      key={`${key}-${size[key]}`}
+      type="number"
+      min={CUSTOM_SIZE.min}
+      max={CUSTOM_SIZE.max}
+      step={CUSTOM_SIZE.step}
+      defaultValue={size[key]}
+      onBlur={(e) => {
+        const v = snapSize(Number(e.target.value) || size[key]);
+        e.target.value = String(v);
+        if (v !== size[key]) onChange({ ...size, [key]: v });
+      }}
+      onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+      title={`${CUSTOM_SIZE.min}–${CUSTOM_SIZE.max}，32 的倍數`}
+      className={`${inputCls} !w-20 !px-2 !py-1 text-xs tabular-nums`}
+    />
+  );
+  return (
+    <div className="flex items-center gap-1 text-xs text-muted">
+      {field("width")}
+      <button
+        className="px-1 hover:text-fg"
+        title="寬高對調"
+        onClick={() => onChange({ width: size.height, height: size.width })}
+      >
+        ×
+      </button>
+      {field("height")}
+      <span className="ml-1 text-faint">{((size.width * size.height) / 1024 / 1024).toFixed(1)} MP</span>
     </div>
   );
 }
@@ -454,7 +576,7 @@ function EditTargets({
       </button>
 
       {picking && (
-        <div className="absolute bottom-full left-0 z-20 mb-2 w-[520px] rounded-xl border border-line bg-raised p-3 shadow-2xl shadow-black/60">
+        <div className="absolute bottom-full left-0 z-20 mb-2 w-[min(520px,calc(100vw-2rem))] rounded-xl border border-line bg-raised p-3 shadow-2xl shadow-black/60">
           <div className="mb-2 flex items-center justify-between text-xs">
             <span className="text-muted">選參考圖（可多選）</span>
             <div className="flex gap-1">
@@ -466,7 +588,7 @@ function EditTargets({
               </IconButton>
             </div>
           </div>
-          <div className="grid max-h-64 grid-cols-6 gap-1.5 overflow-y-auto">
+          <div className="grid max-h-64 grid-cols-4 gap-1.5 sm:grid-cols-6 overflow-y-auto">
             {recent
               .filter((r) => !used.has(r.id))
               .map((r) => (
@@ -518,7 +640,7 @@ function Thumb({
         <button
           onClick={onRemove}
           title="移除"
-          className="absolute -top-1.5 -right-1.5 hidden size-4 place-items-center rounded-full bg-bad text-white group-hover:grid"
+          className="absolute -top-1.5 -right-1.5 hidden size-4 place-items-center rounded-full bg-bad text-white group-hover:grid pointer-coarse:grid"
         >
           <X className="size-3" />
         </button>
@@ -564,7 +686,7 @@ function VideoFrames({
           <button
             onClick={() => setFrame(which)}
             title="移除"
-            className="absolute -top-1.5 -right-1.5 hidden size-4 place-items-center rounded-full bg-bad text-white group-hover:grid"
+            className="absolute -top-1.5 -right-1.5 hidden size-4 place-items-center rounded-full bg-bad text-white group-hover:grid pointer-coarse:grid"
           >
             <X className="size-3" />
           </button>
@@ -592,7 +714,7 @@ function VideoFrames({
       </span>
 
       {picking && (
-        <div className="absolute bottom-full left-0 z-20 mb-2 w-[520px] rounded-xl border border-line bg-raised p-3 shadow-2xl shadow-black/60">
+        <div className="absolute bottom-full left-0 z-20 mb-2 w-[min(520px,calc(100vw-2rem))] rounded-xl border border-line bg-raised p-3 shadow-2xl shadow-black/60">
           <div className="mb-2 flex items-center justify-between text-xs">
             <span className="text-muted">選{picking === "first" ? "第一幀" : "結尾幀"}</span>
             <div className="flex gap-1">
@@ -604,7 +726,7 @@ function VideoFrames({
               </IconButton>
             </div>
           </div>
-          <div className="grid max-h-64 grid-cols-6 gap-1.5 overflow-y-auto">
+          <div className="grid max-h-64 grid-cols-4 gap-1.5 sm:grid-cols-6 overflow-y-auto">
             {recent
               .filter((r) => r.media === "image")
               .map((r) => (

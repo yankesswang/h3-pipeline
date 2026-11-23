@@ -50,7 +50,7 @@ export default function SettingsPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-2xl flex-col gap-8 p-8">
+      <div className="mx-auto flex max-w-2xl flex-col gap-8 p-4 md:p-8">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-medium">設定</h1>
           {saved && (
@@ -69,7 +69,7 @@ export default function SettingsPage() {
                 onBlur={(e) => e.target.value !== s.llmBaseUrl && save({ llmBaseUrl: e.target.value.trim() })}
                 className={inputCls}
               />
-              <Select value="" onChange={(e) => e.target.value && save({ llmBaseUrl: e.target.value })} className="w-36">
+              <Select value="" onChange={(e) => e.target.value && save({ llmBaseUrl: e.target.value })} className="w-28 shrink-0 sm:w-36">
                 <option value="">常用…</option>
                 {LLM_PRESETS.map((p) => (
                   <option key={p.url} value={p.url}>
@@ -128,7 +128,7 @@ export default function SettingsPage() {
               step={0.1}
               defaultValue={s.llmTemperature}
               onMouseUp={(e) => save({ llmTemperature: Number((e.target as HTMLInputElement).value) })}
-              className="w-60 accent-accent-strong"
+              className="w-full max-w-60 accent-accent-strong"
             />
           </Field>
           <Toggle
@@ -185,7 +185,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-baseline gap-2 text-xs">
-        <span className="text-muted">{label}</span>
+        <span className="shrink-0 text-muted">{label}</span>
         {hint && <span className="text-faint">{hint}</span>}
       </div>
       {children}

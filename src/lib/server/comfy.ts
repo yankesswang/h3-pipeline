@@ -22,6 +22,11 @@ type ComfyMessage =
 class ComfyClient {
   readonly clientId = nanoid();
   readonly events = new EventEmitter();
+  /**
+   * The model this app last ran in ComfyUI ("qwen-image", "minimax-video" or
+   * "custom:<tool name>"); null after a free. ComfyUI itself cannot say.
+   */
+  resident: string | null = null;
   private ws?: WebSocket;
   private reconnectTimer?: NodeJS.Timeout;
 
@@ -49,7 +54,11 @@ class ComfyClient {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = setTimeout(() => this.connect(), 3000);
     };
-    ws.onerror = () => ws.close();
+    // A failed socket fires `close` on its own; closing one that is still
+    // connecting fires `error` again, which recursed until the stack overflowed.
+    ws.onerror = () => {
+      if (ws.readyState === WebSocket.OPEN) ws.close();
+    };
   }
 
   private async req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -111,12 +120,19 @@ class ComfyClient {
     return [...q.queue_running, ...q.queue_pending].some((item) => item[1] === promptId);
   }
 
+  /** Check all ComfyUI work, including prompts submitted outside this app. */
+  async hasQueuedWork(): Promise<boolean> {
+    const q = await this.req<{ queue_running: unknown[][]; queue_pending: unknown[][] }>("/queue");
+    return q.queue_running.length > 0 || q.queue_pending.length > 0;
+  }
+
   async interrupt(promptId: string) {
     await this.req("/interrupt", { method: "POST", body: JSON.stringify({ prompt_id: promptId }) });
   }
 
   async free() {
     await this.req("/free", { method: "POST", body: JSON.stringify({ unload_models: true, free_memory: true }) });
+    this.resident = null;
   }
 
   async ping(): Promise<boolean> {

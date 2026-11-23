@@ -11,6 +11,8 @@ export function GET(req: NextRequest) {
       limit: Math.min(Number(sp.get("limit")) || 60, 200),
       favorites: sp.get("favorites") === "1",
       q: sp.get("q") || undefined,
+      source: sp.get("source") === "upload" ? "upload" : sp.get("source") === "generated" ? "generated" : undefined,
+      media: sp.get("media") === "video" ? "video" : sp.get("media") === "image" ? "image" : undefined,
     }),
   );
 }

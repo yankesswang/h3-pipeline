@@ -1,13 +1,16 @@
 import type {
+  BatchRequest,
   ChatMessage,
   CustomTool,
   FieldCandidate,
+  FolderListing,
   GenerateRequest,
   ImageRecord,
   Job,
   LoraInfo,
   Preset,
   Settings,
+  VideoContext,
 } from "@/lib/shared/types";
 
 async function json<T>(res: Response): Promise<T> {
@@ -33,13 +36,21 @@ export const api = {
   jobs: () => fetch("/api/jobs").then(json<Job[]>),
   generate: (req: GenerateRequest) => fetch("/api/jobs", send("POST", req)).then(json<Job[]>),
   cancelJob: (id: string) => fetch(`/api/jobs/${id}`, send("DELETE")).then(json<void>),
+  startBatch: (req: BatchRequest) => fetch("/api/batch", send("POST", req)).then(json<Job[]>),
+  cancelBatch: (id: string) => fetch(`/api/batch/${id}`, send("DELETE")).then(json<{ cancelled: number }>),
+  pickFolder: (start: string) => fetch("/api/batch/pick", send("POST", { start })).then(json<{ path: string | null }>),
+  folder: (path: string) => fetch(`/api/batch/folder?path=${encodeURIComponent(path)}`).then(json<FolderListing>),
 
-  images: (q: { before?: number; limit?: number; favorites?: boolean; q?: string } = {}) => {
+  images: (
+    q: { before?: number; limit?: number; favorites?: boolean; q?: string; source?: "generated" | "upload"; media?: "image" | "video" } = {},
+  ) => {
     const sp = new URLSearchParams();
     if (q.before) sp.set("before", String(q.before));
     if (q.limit) sp.set("limit", String(q.limit));
     if (q.favorites) sp.set("favorites", "1");
     if (q.q) sp.set("q", q.q);
+    if (q.source) sp.set("source", q.source);
+    if (q.media) sp.set("media", q.media);
     return fetch(`/api/images?${sp}`).then(json<ImageRecord[]>);
   },
   image: (id: string) => fetch(`/api/images/${id}`).then(json<ImageRecord>),
@@ -55,11 +66,13 @@ export const api = {
   setFavorite: (id: string, favorite: boolean) =>
     fetch(`/api/images/${id}`, send("PATCH", { favorite })).then(json<ImageRecord>),
   deleteImage: (id: string) => fetch(`/api/images/${id}`, send("DELETE")).then(json<void>),
+  deleteImages: (ids: string[]) => fetch("/api/images/delete", send("POST", { ids })).then(json<{ deleted: number }>),
 
   presets: () => fetch("/api/presets").then(json<Preset[]>),
   createPreset: (p: PresetDraft) => fetch("/api/presets", send("POST", p)).then(json<Preset>),
   updatePreset: (id: string, p: PresetDraft) =>
     fetch(`/api/presets/${id}`, send("PUT", p)).then(json<Preset>),
+  resetPreset: (id: string) => fetch(`/api/presets/${id}/reset`, send("POST")).then(json<Preset>),
   deletePreset: (id: string) => fetch(`/api/presets/${id}`, send("DELETE")).then(json<void>),
 
   settings: () => fetch("/api/settings").then(json<PublicSettings>),
@@ -101,7 +114,7 @@ export interface StreamHandlers {
 /** POST to an LLM route and feed its NDJSON stream to the handlers. Throws on an error line. */
 export async function streamLlm(
   path: "/api/llm/chat" | "/api/llm/expand",
-  body: { presetId: string; messages?: ChatMessage[]; idea?: string; imageIds?: string[] },
+  body: { presetId: string; messages?: ChatMessage[]; idea?: string; imageIds?: string[]; refImageIds?: string[]; video?: VideoContext; continuity?: boolean; batch?: { folder?: string; imageIds?: string[] } },
   h: StreamHandlers,
   signal?: AbortSignal,
 ) {

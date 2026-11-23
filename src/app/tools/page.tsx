@@ -22,7 +22,7 @@ export default function ToolsPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-4xl flex-col gap-6 p-8">
+      <div className="mx-auto flex max-w-4xl flex-col gap-6 p-4 md:p-8">
         <header className="flex items-center gap-3">
           <Boxes className="size-5 text-accent" />
           <h1 className="text-lg font-medium">工具</h1>

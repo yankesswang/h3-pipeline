@@ -187,7 +187,7 @@ function OutpaintHandles({ pads, scale, onPads }: { pads: Pads; scale: number; o
   const handle = (sides: (keyof Pads)[], cls: string, cursor: string) => (
     <div
       key={sides.join()}
-      className={`absolute z-10 ${cls}`}
+      className={`absolute z-10 touch-none ${cls}`}
       style={{ cursor }}
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId);

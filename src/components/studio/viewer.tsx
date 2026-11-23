@@ -72,7 +72,7 @@ export function Viewer({
           />
         ))}
       <div
-        className={`absolute left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-xl bg-black/60 p-1 backdrop-blur ${
+        className={`absolute left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-xl bg-black/60 p-1 whitespace-nowrap backdrop-blur ${
           image.media === "video" && !stage ? "top-3" : "bottom-3"
         }`}
       >

@@ -46,7 +46,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     api.jobs().then(setJobs).catch(() => {});
-    api.images({ limit: 40 }).then(setRecent).catch(() => {});
+    // Loaded apart so a pile of uploads (a batch) can't push generated work out, and the other way round.
+    Promise.all([api.images({ limit: 40, source: "generated" }), api.images({ limit: 40, source: "upload" })])
+      .then(([made, uploads]) => setRecent([...made, ...uploads].sort((a, b) => b.createdAt - a.createdAt)))
+      .catch(() => {});
     api.presets().then(setPresets).catch(() => {});
     api.status().then(setStatus, () => setStatus(null));
     const t = setInterval(refreshStatus, 15_000);

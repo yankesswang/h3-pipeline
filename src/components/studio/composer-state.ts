@@ -1,7 +1,7 @@
 import type { AspectId } from "@/lib/shared/sizes";
 import { randomSeed, sizeFor } from "@/lib/shared/sizes";
-import { videoSize } from "@/lib/tools/video";
-import type { GenerateParams, ImageRecord, LoraUse, PresetPurpose, PromptOrigin } from "@/lib/shared/types";
+import { DEFAULT_VIDEO_SPEED, speedOf, VIDEO_SPEEDS, videoSize } from "@/lib/tools/video";
+import type { GenerateParams, ImageRecord, LoraUse, PresetPurpose, PromptOrigin, VideoContext, VideoSpeed } from "@/lib/shared/types";
 
 export interface Pads {
   left: number;
@@ -32,6 +32,16 @@ export interface VideoSettings {
   first?: ImageRecord;
   /** Optional end frame (needs a first frame). */
   last?: ImageRecord;
+  /** 4 or 8-step Turbo LoRA, or the base model. */
+  speed: VideoSpeed;
+  steps: number;
+  sampler: string;
+  scheduler: string;
+}
+
+export interface Size {
+  width: number;
+  height: number;
 }
 
 export interface ComposerState {
@@ -39,8 +49,14 @@ export interface ComposerState {
   negativePrompt: string;
   aspect: AspectId;
   megapixels: number;
+  /** Set: exact width × height instead of aspect and megapixels. */
+  customSize: Size | null;
   steps: number;
   cfg: number;
+  sampler: string;
+  scheduler: string;
+  /** Editing only: below 1 keeps more of the source's structure. */
+  denoise: number;
   seed: number;
   /** Unlocked: a fresh random seed every run. */
   seedLocked: boolean;
@@ -60,14 +76,18 @@ export const initialComposer: ComposerState = {
   negativePrompt: "",
   aspect: "1:1",
   megapixels: 1,
+  customSize: null,
   steps: 40,
   cfg: 1,
+  sampler: "euler",
+  scheduler: "simple",
+  denoise: 1,
   seed: randomSeed(),
   seedLocked: false,
   count: 1,
   loras: [],
   mode: "image",
-  video: { seconds: 3, megapixels: 0.4 },
+  video: { seconds: 3, megapixels: 0.4, speed: DEFAULT_VIDEO_SPEED, steps: VIDEO_SPEEDS[DEFAULT_VIDEO_SPEED].steps, sampler: "res_multistep", scheduler: "simple" },
 };
 
 export const purposeOf = (s: ComposerState): PresetPurpose =>
@@ -89,6 +109,16 @@ export function videoDims(s: ComposerState) {
   return videoSize(s.video.megapixels, aw, ah);
 }
 
+/** What the LLM needs to know about the clip when writing a video prompt. */
+export function videoContext(s: ComposerState): VideoContext | undefined {
+  if (s.mode !== "video") return undefined;
+  const { width, height } = videoDims(s);
+  return { seconds: s.video.seconds, width, height };
+}
+
+/** A new image's size: the custom one, or the aspect at the pixel budget. */
+export const imageSize = (s: ComposerState): Size => s.customSize ?? sizeFor(s.aspect, s.megapixels);
+
 export function toParams(s: ComposerState): GenerateParams {
   if (s.mode === "video") {
     const v = s.video;
@@ -96,21 +126,24 @@ export function toParams(s: ComposerState): GenerateParams {
       prompt: s.prompt.trim(),
       negativePrompt: "",
       ...videoDims(s),
-      steps: 8,
+      steps: v.steps,
       cfg: 1,
       seed: s.seedLocked ? s.seed : randomSeed(),
+      sampler: v.sampler,
+      scheduler: v.scheduler,
       video: {
         seconds: v.seconds,
         megapixels: v.megapixels,
         firstFrameId: v.first?.id,
         lastFrameId: v.first ? v.last?.id : undefined,
+        speed: v.speed,
       },
     };
   }
   const o = s.edit?.outpaint ?? NO_PADS;
   const size = s.edit
     ? { width: s.edit.source.width + o.left + o.right, height: s.edit.source.height + o.top + o.bottom }
-    : sizeFor(s.aspect, s.megapixels);
+    : imageSize(s);
   return {
     prompt: s.prompt.trim(),
     negativePrompt: s.negativePrompt,
@@ -118,6 +151,9 @@ export function toParams(s: ComposerState): GenerateParams {
     steps: s.steps,
     cfg: s.cfg,
     seed: s.seedLocked ? s.seed : randomSeed(),
+    sampler: s.sampler,
+    scheduler: s.scheduler,
+    ...(s.edit && s.denoise < 1 ? { denoise: s.denoise } : {}),
     ...(s.edit ? { sourceImageId: s.edit.source.id, refImageIds: s.edit.refs.map((r) => r.id) } : {}),
     ...(s.edit && hasPads(s.edit.outpaint) ? { outpaint: s.edit.outpaint } : {}),
     ...(s.loras.length ? { loras: s.loras } : {}),
@@ -155,6 +191,7 @@ export function fromImage(
   const aspect = aspects.reduce((best, a) => (Math.abs(a[1] - ratio) < Math.abs(best[1] - ratio) ? a : best))[0];
   const mp = (p.width * p.height) / (1024 * 1024);
   const megapixels = [1, 2, 4].reduce((b, m) => (Math.abs(m - mp) < Math.abs(b - mp) ? m : b));
+  const preset = sizeFor(aspect, megapixels);
   const source = p.sourceImageId ? lookup(p.sourceImageId) : undefined;
   if (p.video)
     return {
@@ -168,6 +205,10 @@ export function fromImage(
       video: {
         seconds: p.video.seconds,
         megapixels: p.video.megapixels,
+        speed: speedOf(p.video),
+        steps: p.steps || VIDEO_SPEEDS[speedOf(p.video)].steps,
+        sampler: p.sampler ?? initialComposer.video.sampler,
+        scheduler: p.scheduler ?? initialComposer.video.scheduler,
         first: p.video.firstFrameId ? lookup(p.video.firstFrameId) : undefined,
         last: p.video.lastFrameId ? lookup(p.video.lastFrameId) : undefined,
       },
@@ -177,8 +218,12 @@ export function fromImage(
     negativePrompt: p.negativePrompt,
     aspect,
     megapixels,
+    customSize: preset.width === p.width && preset.height === p.height ? null : { width: p.width, height: p.height },
     steps: p.steps || 40,
     cfg: p.cfg || 1,
+    sampler: p.sampler ?? initialComposer.sampler,
+    scheduler: p.scheduler ?? initialComposer.scheduler,
+    denoise: p.denoise ?? 1,
     seed: p.seed,
     seedLocked: lockSeed,
     count: 1,

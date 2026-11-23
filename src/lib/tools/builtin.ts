@@ -42,6 +42,8 @@ const commonFields = {
   steps: { node: "7", input: "steps" },
   cfg: { node: "7", input: "cfg" },
   seed: { node: "7", input: "seed" },
+  sampler: { node: "7", input: "sampler_name" },
+  scheduler: { node: "7", input: "scheduler" },
 };
 
 export const qwen21TextToImage: Tool = {
@@ -88,6 +90,8 @@ export const qwen21Edit: Tool = {
     ...commonFields,
     // Pixel budget each image is resized to; 0 keeps every image at its own size.
     resolution: { node: "5", input: "resolution" },
+    // Starts from image_1's latent, so below 1 keeps more of the source.
+    denoise: { node: "7", input: "denoise" },
   },
   imageInput: { node: "5", prefix: "images.image_", max: 10 },
 };

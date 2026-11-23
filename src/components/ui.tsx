@@ -44,7 +44,7 @@ export function Select({ className = "", ...props }: SelectHTMLAttributes<HTMLSe
   return (
     <select
       {...props}
-      className={`rounded-lg border border-line bg-raised px-2 py-1.5 text-sm text-fg outline-none focus:border-accent ${className}`}
+      className={`max-w-full min-w-0 rounded-lg border border-line bg-raised px-2 py-1.5 text-sm text-fg outline-none focus:border-accent ${className}`}
     />
   );
 }

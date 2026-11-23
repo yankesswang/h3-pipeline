@@ -10,6 +10,20 @@ export const GROUPS: { id: ProcGroup; label: string }[] = [
   { id: "other", label: "其他" },
 ];
 
+/** Models the monitor can switch the GPU to. */
+export interface ModelCatalog {
+  /** What this app runs in ComfyUI. */
+  comfy: { id: string; label: string; desc: string }[];
+  /** LM Studio's chat models. */
+  llms: { key: string; label: string; sizeMb: number; params?: string; quant?: string; vision: boolean }[];
+  /** The model this app last ran in ComfyUI; null when unknown or freed. */
+  comfyResident: string | null;
+  /** The model the prompt assistant uses. */
+  currentLlm: string;
+  switching: { target: string; stage: string } | null;
+  lastError?: string;
+}
+
 export interface ProcInfo {
   pid: number;
   group: ProcGroup;

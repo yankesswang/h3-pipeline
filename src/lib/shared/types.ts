@@ -36,6 +36,11 @@ export interface GenerateParams {
   steps: number;
   cfg: number;
   seed: number;
+  /** Sampler and scheduler names; absent = the tool's default. */
+  sampler?: string;
+  scheduler?: string;
+  /** Editing: how much of the source is re-drawn (below 1 keeps more of its structure); absent = 1. */
+  denoise?: number;
   /** Editing: the image being changed (it becomes <image1>). */
   sourceImageId?: string;
   /** Editing: extra reference images, <image2> onwards. */
@@ -50,6 +55,40 @@ export interface GenerateParams {
   toolValues?: Record<string, unknown>;
   /** Video generation settings. */
   video?: VideoParams;
+  /** Editing: pixel budget each input is resized to (1024 ≈ 1 MP); 0 or absent keeps their own size. */
+  resolution?: number;
+  /** Set when the job is one image of a batch edit. */
+  batch?: BatchInfo;
+}
+
+/** One image of a batch: the same edit applied to many images. */
+export interface BatchInfo {
+  id: string;
+  /** 0-based position in the batch. */
+  index: number;
+  total: number;
+  /** The original file name, for images read from a folder. */
+  name?: string;
+  /** Also write the result to this folder as `<name>.png`. */
+  saveTo?: string;
+}
+
+export interface BatchRequest {
+  /** A folder on this machine; every PNG / JPG / WEBP in it, in file name order. */
+  folder?: string;
+  /** Or images already in the gallery. */
+  imageIds?: string[];
+  params: GenerateParams;
+  saveTo?: string;
+  /** Where the instruction came from (an LLM expansion), kept on every result. */
+  origin?: PromptOrigin;
+}
+
+export interface FolderListing {
+  path: string;
+  parent?: string;
+  dirs: string[];
+  images: string[];
 }
 
 export interface VideoParams {
@@ -60,6 +99,31 @@ export interface VideoParams {
   firstFrameId?: string;
   /** Optional end frame the video moves towards. */
   lastFrameId?: string;
+  /** Images the clip passes through in between (needs a first frame), in time order. */
+  keyframes?: VideoKeyframe[];
+  /** Which speed-up LoRA runs, if any. Absent: older clips, see `turbo`. */
+  speed?: VideoSpeed;
+  /** Older clips: false = base model, otherwise the 8-step Turbo LoRA. */
+  turbo?: boolean;
+}
+
+/** pi-H3 2 or 4-step DWD adapter, 4 or 8-step Turbo LoRA, or the base model at about 20 steps. */
+export type VideoSpeed = "pi2" | "pi4" | "turbo4" | "turbo8" | "base";
+
+export interface VideoKeyframe {
+  imageId: string;
+  /** Seconds from the start. */
+  at: number;
+}
+
+/** What the LLM is told about a video clip, so it can pace the action and read the attached frames right. */
+export interface VideoContext {
+  seconds: number;
+  /** Text to video: the clip's size. */
+  width?: number;
+  height?: number;
+  /** Seconds of the keyframes attached between the first frame and the end frame. */
+  keyframes?: number[];
 }
 
 export interface LoraUse {

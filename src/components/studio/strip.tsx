@@ -73,7 +73,7 @@ export function Strip({
               <button
                 onClick={() => onAddRef(img)}
                 title="加為參考圖"
-                className="absolute top-0.5 right-0.5 hidden size-5 place-items-center rounded-md bg-black/70 text-fg group-hover:grid hover:bg-accent-strong"
+                className="absolute top-0.5 right-0.5 hidden size-5 place-items-center rounded-md bg-black/70 text-fg group-hover:grid pointer-coarse:grid hover:bg-accent-strong"
               >
                 <Plus className="size-3.5" />
               </button>

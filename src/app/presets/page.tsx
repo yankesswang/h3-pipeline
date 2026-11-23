@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Copy, Lock, Plus, Play, Square, Trash2 } from "lucide-react";
+import { ArrowLeft, Copy, Lock, Plus, Play, RotateCcw, Square, Trash2 } from "lucide-react";
 import { api, imageUrl, streamLlm } from "@/lib/client/api";
 import { FAMILY_LABELS, PURPOSE_LABELS, type ModelFamily, type Preset, type PresetPurpose } from "@/lib/shared/types";
 import { useStudio } from "@/components/studio-provider";
@@ -13,16 +13,22 @@ export default function PresetsPage() {
   const { presets, reloadPresets } = useStudio();
   const [selectedId, setSelectedId] = useState<string>();
   const selected = presets.find((p) => p.id === selectedId) ?? presets[0];
+  // Phones show the list or the editor, not both: the editor once one is picked.
+  const [picked, setPicked] = useState(false);
+  const pick = (id: string | undefined) => {
+    setSelectedId(id);
+    setPicked(!!id);
+  };
 
   const create = async () => {
     const p = await api.createPreset({ name: "新範本", family: "qwen-image", purpose: "generate", content: "You are an image prompt writer. Output only the prompt." });
     await reloadPresets();
-    setSelectedId(p.id);
+    pick(p.id);
   };
 
   return (
     <div className="flex h-full">
-      <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-panel">
+      <aside className={`w-full shrink-0 flex-col border-line bg-panel md:flex md:w-72 md:border-r ${picked ? "hidden" : "flex"}`}>
         <header className="flex items-center justify-between border-b border-line px-4 py-3">
           <h1 className="text-base font-medium">Prompt 庫</h1>
           <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={create}>
@@ -36,12 +42,13 @@ export default function PresetsPage() {
           {presets.filter((p) => p.purpose === purpose).map((p) => (
             <button
               key={p.id}
-              onClick={() => setSelectedId(p.id)}
+              onClick={() => pick(p.id)}
               className={`mb-1 w-full rounded-lg px-3 py-2 text-left ${p.id === selected?.id ? "bg-raised" : "hover:bg-raised/50"}`}
             >
               <div className="flex items-center gap-1.5">
                 {p.builtin && <Lock className="size-3 text-faint" />}
                 <span className="truncate">{p.name}</span>
+                {p.builtin && p.updatedAt > 0 && <span className="shrink-0 text-[10px] text-accent">已修改</span>}
               </div>
               <div className="mt-0.5 text-xs text-faint">{FAMILY_LABELS[p.family]}</div>
             </button>
@@ -52,16 +59,22 @@ export default function PresetsPage() {
       </aside>
 
       {/* Keyed so the draft resets whenever another preset is picked or this one is saved. */}
-      {selected && <Editor key={`${selected.id}:${selected.updatedAt}`} preset={selected} onSelect={setSelectedId} />}
+      {selected && (
+        <div className={`min-w-0 flex-1 md:flex ${picked ? "flex" : "hidden"}`}>
+          <Editor key={`${selected.id}:${selected.updatedAt}`} preset={selected} onSelect={pick} onBack={() => setPicked(false)} />
+        </div>
+      )}
     </div>
   );
 }
 
-function Editor({ preset, onSelect }: { preset: Preset; onSelect: (id: string | undefined) => void }) {
+function Editor({ preset, onSelect, onBack }: { preset: Preset; onSelect: (id: string | undefined) => void; onBack: () => void }) {
   const { reloadPresets } = useStudio();
   const [draft, setDraft] = useState<Draft>({ name: preset.name, family: preset.family, purpose: preset.purpose, content: preset.content });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
+  /** A built-in preset the user has edited: it can be put back to the shipped version. */
+  const modified = preset.builtin && preset.updatedAt > 0;
   const dirty =
     draft.name !== preset.name || draft.family !== preset.family || draft.purpose !== preset.purpose || draft.content !== preset.content;
 
@@ -84,31 +97,30 @@ function Editor({ preset, onSelect }: { preset: Preset; onSelect: (id: string | 
 
   return (
         <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-6">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-3 md:p-6">
+            <button onClick={onBack} className="flex items-center gap-1.5 self-start text-xs text-muted hover:text-fg md:hidden">
+              <ArrowLeft className="size-3.5" /> 所有範本
+            </button>
             {preset.builtin && (
               <div className="flex items-center gap-3 rounded-lg border border-line bg-raised/50 px-4 py-2.5 text-xs text-muted">
-                <Lock className="size-3.5" /> 內建範本是唯讀的。複製一份就能自由修改。
-                <Button variant="primary" className="ml-auto !px-2.5 !py-1 text-xs" onClick={duplicate}>
-                  <Copy className="size-3.5" /> 複製來修改
-                </Button>
+                <Lock className="size-3.5" />
+                {modified ? "這是修改過的內建範本，隨時可以還原成預設內容。" : "內建範本可以直接修改；改過後可隨時還原預設。"}
               </div>
             )}
 
-            <div className="flex gap-3">
-              <label className="flex flex-1 flex-col gap-1 text-xs text-muted">
+            <div className="flex flex-wrap gap-3">
+              <label className="flex min-w-48 flex-1 flex-col gap-1 text-xs text-muted">
                 名稱
                 <input
                   value={draft.name}
-                  disabled={preset.builtin}
                   onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                   className={inputCls}
                 />
               </label>
-              <label className="flex w-36 flex-col gap-1 text-xs text-muted">
+              <label className="flex flex-1 flex-col gap-1 text-xs text-muted sm:w-36 sm:flex-none">
                 用途
                 <Select
                   value={draft.purpose}
-                  disabled={preset.builtin}
                   onChange={(e) => setDraft({ ...draft, purpose: e.target.value as PresetPurpose })}
                 >
                   {Object.entries(PURPOSE_LABELS).map(([k, v]) => (
@@ -118,11 +130,10 @@ function Editor({ preset, onSelect }: { preset: Preset; onSelect: (id: string | 
                   ))}
                 </Select>
               </label>
-              <label className="flex w-60 flex-col gap-1 text-xs text-muted">
+              <label className="flex w-full flex-col gap-1 text-xs text-muted sm:w-60">
                 適用模型
                 <Select
                   value={draft.family}
-                  disabled={preset.builtin}
                   onChange={(e) => setDraft({ ...draft, family: e.target.value as ModelFamily })}
                 >
                   {Object.entries(FAMILY_LABELS).map(([k, v]) => (
@@ -138,7 +149,6 @@ function Editor({ preset, onSelect }: { preset: Preset; onSelect: (id: string | 
               System prompt
               <textarea
                 value={draft.content}
-                readOnly={preset.builtin}
                 onChange={(e) => setDraft({ ...draft, content: e.target.value })}
                 rows={16}
                 className={`${inputCls} font-mono text-[13px] leading-relaxed`}
@@ -147,8 +157,7 @@ function Editor({ preset, onSelect }: { preset: Preset; onSelect: (id: string | 
 
             {error && <p className="text-xs text-bad">{error}</p>}
 
-            {!preset.builtin && (
-              <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
                 <Button variant="primary" disabled={!dirty || saving} onClick={() => run(() => api.updatePreset(preset.id, draft))}>
                   儲存
                 </Button>
@@ -158,20 +167,33 @@ function Editor({ preset, onSelect }: { preset: Preset; onSelect: (id: string | 
                 <Button variant="ghost" onClick={duplicate}>
                   <Copy className="size-3.5" /> 複製
                 </Button>
-                <Button
-                  variant="danger"
-                  className="ml-auto"
-                  onClick={() => {
-                    if (confirm(`刪除「${preset.name}」？`)) run(async () => {
-                      await api.deletePreset(preset.id);
-                      onSelect(undefined);
-                    });
-                  }}
-                >
-                  <Trash2 className="size-3.5" /> 刪除
-                </Button>
-              </div>
-            )}
+                {preset.builtin ? (
+                  modified && (
+                    <Button
+                      variant="ghost"
+                      className="ml-auto"
+                      onClick={() => {
+                        if (confirm(`把「${preset.name}」還原成預設內容？你的修改會消失。`)) run(() => api.resetPreset(preset.id));
+                      }}
+                    >
+                      <RotateCcw className="size-3.5" /> 還原預設
+                    </Button>
+                  )
+                ) : (
+                  <Button
+                    variant="danger"
+                    className="ml-auto"
+                    onClick={() => {
+                      if (confirm(`刪除「${preset.name}」？`)) run(async () => {
+                        await api.deletePreset(preset.id);
+                        onSelect(undefined);
+                      });
+                    }}
+                  >
+                    <Trash2 className="size-3.5" /> 刪除
+                  </Button>
+                )}
+            </div>
 
             <TryIt preset={preset} dirty={dirty} />
           </div>

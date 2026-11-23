@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Brain, CornerDownLeft, Eraser, Images, Sparkles, Square } from "lucide-react";
+import { ArrowUp, Brain, CornerDownLeft, Eraser, Images, Sparkles, Square, X } from "lucide-react";
 import { extractPrompt, streamLlm } from "@/lib/client/api";
-import type { ChatMessage, PresetPurpose } from "@/lib/shared/types";
+import type { ChatMessage, PresetPurpose, VideoContext } from "@/lib/shared/types";
 import { IconButton, PresetSelect } from "@/components/ui";
 import { useStudio } from "@/components/studio-provider";
 
@@ -19,14 +19,20 @@ export function ChatPanel({
   setPresetId,
   purpose,
   imageIds,
+  video,
   onUsePrompt,
+  onClose,
 }: {
   presetId: string;
   setPresetId: (id: string) => void;
   purpose: PresetPurpose;
   /** Edit mode: the images the LLM gets to see with the next message. */
   imageIds: string[];
+  /** Video mode: the clip's length and size, sent with each message. */
+  video?: VideoContext;
   onUsePrompt: (prompt: string, chat: ChatMessage[], generate: boolean) => void;
+  /** Phones: the panel covers the page and needs its own close button. */
+  onClose?: () => void;
 }) {
   const { presets } = useStudio();
   const [messages, setMessages] = useState<UiMessage[]>([]);
@@ -69,7 +75,7 @@ export function ChatPanel({
     try {
       await streamLlm(
         "/api/llm/chat",
-        { presetId, messages: plain(history), imageIds },
+        { presetId, messages: plain(history), imageIds, video },
         {
           onContent: (t) => patchLast((m) => ({ ...m, content: m.content + t })),
           onReasoning: (t) => patchLast((m) => ({ ...m, reasoning: (m.reasoning ?? "") + t })),
@@ -87,7 +93,7 @@ export function ChatPanel({
   }
 
   return (
-    <aside className="flex h-full w-[380px] shrink-0 flex-col border-l border-line bg-panel">
+    <aside className="flex h-full w-[380px] shrink-0 flex-col border-l border-line bg-panel max-md:fixed max-md:inset-x-0 max-md:top-0 max-md:bottom-[calc(3.5rem+env(safe-area-inset-bottom))] max-md:z-40 max-md:h-auto max-md:w-full max-md:border-l-0">
       <header className="flex items-center gap-2 border-b border-line px-4 py-3">
         <Sparkles className="size-4 text-accent" />
         <h2 className="font-medium">Prompt 助手</h2>
@@ -102,6 +108,11 @@ export function ChatPanel({
         >
           <Eraser className="size-4" />
         </IconButton>
+        {onClose && (
+          <IconButton label="關閉" className="md:hidden" onClick={onClose}>
+            <X className="size-4" />
+          </IconButton>
+        )}
       </header>
 
       <div className="border-b border-line px-4 py-2">

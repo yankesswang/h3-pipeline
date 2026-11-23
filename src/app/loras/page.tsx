@@ -17,7 +17,7 @@ export default function LorasPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-4xl flex-col gap-5 p-8">
+      <div className="mx-auto flex max-w-4xl flex-col gap-5 p-4 md:p-8">
         <header className="flex items-center gap-3">
           <Layers className="size-5 text-accent" />
           <h1 className="text-lg font-medium">LoRA</h1>
@@ -65,7 +65,7 @@ function LoraRow({ lora }: { lora: LoraInfo }) {
   }
 
   return (
-    <div className="flex items-center gap-4 rounded-xl border border-line bg-panel p-3">
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-panel p-3 md:flex-nowrap md:gap-4">
       {lora.hasPreview ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={loraPreviewUrl(lora.name)} alt="" className="size-16 shrink-0 rounded-lg object-cover" />
@@ -74,11 +74,11 @@ function LoraRow({ lora }: { lora: LoraInfo }) {
           <Layers className="size-5" />
         </div>
       )}
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+      <div className="flex min-w-0 flex-1 basis-48 flex-col gap-1.5">
         <span className="truncate font-mono text-xs">{lora.name}</span>
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="觸發詞或備註" className={`${inputCls} !py-1 text-xs`} />
       </div>
-      <label className="flex w-40 shrink-0 flex-col gap-1 text-xs text-muted">
+      <label className="flex min-w-40 flex-1 flex-col gap-1 text-xs text-muted md:w-40 md:flex-none">
         <span className="flex justify-between">
           預設強度 <span className="text-fg tabular-nums">{strength.toFixed(2)}</span>
         </span>

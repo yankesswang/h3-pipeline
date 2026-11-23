@@ -90,8 +90,8 @@ export default function ToolRunPage({ params }: { params: Promise<{ id: string }
     return <div className="grid h-full place-items-center text-faint">{error ?? <Loader2 className="size-5 animate-spin" />}</div>;
 
   return (
-    <div className="flex h-full">
-      <div className="flex w-[440px] shrink-0 flex-col border-r border-line bg-panel">
+    <div className="flex h-full flex-col overflow-y-auto md:flex-row md:overflow-hidden">
+      <div className="flex w-full shrink-0 flex-col border-b border-line bg-panel md:w-[440px] md:border-r md:border-b-0">
         <header className="flex items-center gap-2 border-b border-line px-4 py-3">
           <Link href="/tools" className="text-muted hover:text-fg">
             <ArrowLeft className="size-4" />
@@ -103,7 +103,7 @@ export default function ToolRunPage({ params }: { params: Promise<{ id: string }
             </IconButton>
           </Link>
         </header>
-        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
+        <div className="flex flex-1 flex-col gap-4 p-3 md:overflow-y-auto md:p-4">
           {tool.description && <p className="text-xs text-muted">{tool.description}</p>}
           {tool.fields.length === 0 && <p className="text-xs text-faint">這個工具沒有露出任何欄位，按「執行」會照原 workflow 跑。</p>}
           {tool.fields.map((f) => (
@@ -125,7 +125,7 @@ export default function ToolRunPage({ params }: { params: Promise<{ id: string }
             </label>
           )}
         </div>
-        <div className="flex items-center gap-2 border-t border-line p-3">
+        <div className="sticky bottom-0 z-10 flex items-center gap-2 border-t border-line bg-panel p-3">
           {error && <p className="flex-1 text-xs text-bad">{error}</p>}
           <div className="ml-auto flex items-center rounded-lg border border-line text-xs">
             <button className="px-2 py-1 text-muted hover:text-fg" onClick={() => setCount((c) => Math.max(1, c - 1))}>
@@ -142,7 +142,7 @@ export default function ToolRunPage({ params }: { params: Promise<{ id: string }
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="shrink-0 p-3 md:flex-1 md:shrink md:overflow-y-auto md:p-6">
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
           {active.map((j) => (
             <div key={j.id} className={`grid aspect-square place-items-center rounded-xl border border-line ${j.status === "running" ? "shimmer" : "bg-panel"}`}>
@@ -178,7 +178,7 @@ function ResultCard({ img, onReuse }: { img: ImageRecord; onReuse: () => void })
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={imageUrl(img.id, 640)} alt="" className="w-full" style={{ aspectRatio: img.width / img.height }} />
       </a>
-      <div className="absolute inset-x-0 bottom-0 flex gap-1 bg-gradient-to-t from-black/80 to-transparent p-2 pt-6 opacity-0 transition group-hover:opacity-100">
+      <div className="absolute inset-x-0 bottom-0 flex gap-1 bg-gradient-to-t from-black/80 to-transparent p-2 pt-6 opacity-0 transition group-hover:opacity-100 pointer-coarse:opacity-100">
         <button onClick={onReuse} className="rounded-md bg-black/60 px-2 py-1 text-xs hover:bg-accent-strong">
           用這組設定
         </button>
@@ -353,7 +353,7 @@ function ImageField({
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept="image/jpeg,image/png,image/webp"
         hidden
         onChange={async (e) => {
           const f = e.target.files?.[0];

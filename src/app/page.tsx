@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ImageDown, PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import { api } from "@/lib/client/api";
 import { clearMask, createMask, exportMask, invertMask, loadMask, maskIsEmpty } from "@/lib/client/mask";
-import type { ChatMessage, ImageRecord, PresetPurpose } from "@/lib/shared/types";
+import type { ChatMessage, ImageRecord, PresetPurpose, PromptOrigin } from "@/lib/shared/types";
+import { VIDEO_SPEED_REV } from "@/lib/tools/video";
 import { ImageInfo } from "@/components/image-info";
 import { useStudio } from "@/components/studio-provider";
 import { ChatPanel } from "@/components/studio/chat-panel";
@@ -12,6 +13,7 @@ import { Composer } from "@/components/studio/composer";
 import {
   addRefs,
   editImageIds,
+  videoContext,
   fromImage,
   hasPads,
   initialComposer,
@@ -39,6 +41,7 @@ export default function StudioPage() {
   const [selection, setSelection] = useState<Selection>(null);
   const [panel, setPanel] = useState<"info" | "tree" | null>(null);
   const [showChat, setShowChat] = useState(true);
+  const [autoExpand, setAutoExpand] = useState(false);
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -87,11 +90,29 @@ export default function StudioPage() {
     try {
       const saved = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "null");
       if (saved) {
-        setComposer((s) => ({ ...s, ...saved.composer, prompt: "", origin: undefined, edit: undefined }));
+        setComposer((s) => ({
+          ...s,
+          ...saved.composer,
+          // Saved before speeds existed (its steps were for 8-step Turbo) or before pi-H3 became
+          // the default: take the new default's speed and steps.
+          video: {
+            ...s.video,
+            ...saved.composer?.video,
+            ...(saved.composer?.video?.speed && saved.speedRev === VIDEO_SPEED_REV ? {} : { speed: s.video.speed, steps: s.video.steps }),
+          },
+          // Always open on images; video only comes from a link (?video= / ?continue=).
+          mode: "image",
+          prompt: "",
+          origin: undefined,
+          edit: undefined,
+        }));
         if (saved.presetIds) setPresetIds({ ...DEFAULT_PRESETS, ...saved.presetIds });
         if (typeof saved.showChat === "boolean") setShowChat(saved.showChat);
+        if (typeof saved.autoExpand === "boolean") setAutoExpand(saved.autoExpand);
       }
     } catch {}
+    // On a phone the assistant covers the whole screen, so it starts closed.
+    if (isPhone()) setShowChat(false);
     /* eslint-enable react-hooks/set-state-in-effect */
     const sp = new URLSearchParams(window.location.search);
     const reuse = sp.get("reuse");
@@ -114,15 +135,14 @@ export default function StudioPage() {
   }, []);
 
   useEffect(() => {
-    const { aspect, megapixels, steps, cfg, count, negativePrompt, loras, mode } = composer;
-    const video = { seconds: composer.video.seconds, megapixels: composer.video.megapixels };
+    const { aspect, megapixels, customSize, steps, cfg, sampler, scheduler, denoise, count, negativePrompt, loras } = composer;
+    const { seconds, speed, sampler: vSampler, scheduler: vScheduler } = composer.video;
+    const video = { seconds, megapixels: composer.video.megapixels, speed, steps: composer.video.steps, sampler: vSampler, scheduler: vScheduler };
+    const saved = { aspect, megapixels, customSize, steps, cfg, sampler, scheduler, denoise, count, negativePrompt, loras, video };
     try {
-      localStorage.setItem(
-        PREFS_KEY,
-        JSON.stringify({ composer: { aspect, megapixels, steps, cfg, count, negativePrompt, loras, mode, video }, presetIds, showChat }),
-      );
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ composer: saved, presetIds, showChat, autoExpand, speedRev: VIDEO_SPEED_REV }));
     } catch {}
-  }, [composer, presetIds, showChat]);
+  }, [composer, presetIds, showChat, autoExpand]);
 
   // Each mode keeps its own preset; fall back to the first one of that purpose if it was deleted.
   const purpose = purposeOf(composer);
@@ -134,7 +154,13 @@ export default function StudioPage() {
   const setPresetId = (id: string) => setPresetIds((p) => ({ ...p, [purpose]: id }));
 
   const pendingJobs = useMemo(
-    () => jobs.filter((j) => j.status === "queued" || j.status === "running" || (j.status === "error" && Date.now() - j.createdAt < 10 * 60_000)),
+    () =>
+      jobs.filter((j) =>
+        // Batches are followed on their own page; only the one running shows here.
+        j.params.batch
+          ? j.status === "running"
+          : j.status === "queued" || j.status === "running" || (j.status === "error" && Date.now() - j.createdAt < 10 * 60_000),
+      ),
     [jobs],
   );
 
@@ -142,7 +168,9 @@ export default function StudioPage() {
   const selJob = selection?.kind === "job" ? jobs.find((j) => j.id === selection.id) : undefined;
   const selImageId = selection?.kind === "image" ? selection.id : selJob?.imageId;
   const selImage = selImageId ? lookup(selImageId) : undefined;
-  const shownImage = selImage ?? (selection ? undefined : recent[0]);
+  // Uploads are inputs, not results: they stay out of the strip and aren't shown by default.
+  const made = useMemo(() => recent.filter((r) => r.tool !== "upload"), [recent]);
+  const shownImage = selImage ?? (selection ? undefined : made[0]);
   const queuePosition =
     selJob?.status === "queued"
       ? jobs.filter((j) => (j.status === "queued" || j.status === "running") && j.createdAt < selJob.createdAt).length
@@ -223,8 +251,8 @@ export default function StudioPage() {
   );
 
   const generate = useCallback(
-    async (override?: { prompt: string; chat: ChatMessage[] }) => {
-      const state = override ? { ...composer, prompt: override.prompt, origin: originForChat(override.chat) } : composer;
+    async (override?: { prompt: string; origin: PromptOrigin }) => {
+      const state = override ? { ...composer, prompt: override.prompt, origin: override.origin } : composer;
       const outpaint = state.edit && hasPads(state.edit.outpaint);
       if (!state.prompt.trim() && !outpaint) return;
       const mask = !outpaint && state.edit && maskOwner === state.edit.source.id ? maskRef.current?.canvas : undefined;
@@ -264,7 +292,8 @@ export default function StudioPage() {
 
   function applyChatPrompt(prompt: string, chat: ChatMessage[], andGenerate: boolean) {
     setComposer((s) => ({ ...s, prompt, origin: originForChat(chat) }));
-    if (andGenerate) void generate({ prompt, chat });
+    if (isPhone()) setShowChat(false);
+    if (andGenerate) void generate({ prompt, origin: originForChat(chat) });
   }
 
   function selectImage(img: ImageRecord) {
@@ -367,7 +396,7 @@ export default function StudioPage() {
         void upload([...e.dataTransfer.files]);
       }}
     >
-      <div className="flex min-w-0 flex-1 flex-col gap-2 p-4">
+      <div className="flex min-w-0 flex-1 flex-col gap-2 p-2 md:p-4">
         {shownImage && (
           <Lineage tree={tree} currentId={shownImage.id} onSelect={selectImage} onShowTree={() => setPanel("tree")} />
         )}
@@ -435,7 +464,7 @@ export default function StudioPage() {
             </IconButton>
           </div>
           {panel && shownImage && (
-            <div className="flex w-80 shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-panel">
+            <div className="flex shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-2xl shadow-black/60 max-md:fixed max-md:inset-x-2 max-md:top-2 max-md:bottom-16 max-md:z-40 md:w-80 md:shadow-none">
               <div className="flex items-center gap-1 border-b border-line p-2">
                 {(["info", "tree"] as const).map((k) => (
                   <button
@@ -474,7 +503,7 @@ export default function StudioPage() {
 
         <Strip
           jobs={pendingJobs}
-          images={recent}
+          images={made}
           selection={selection ?? (shownImage ? { kind: "image", id: shownImage.id } : null)}
           onSelect={setSelection}
           onAddRef={composer.edit ? (img) => setComposer((s) => addRefs(s, [img])) : undefined}
@@ -488,19 +517,23 @@ export default function StudioPage() {
           setState={setComposer}
           presetId={presetId}
           setPresetId={setPresetId}
-          onGenerate={() => generate()}
+          onGenerate={(override) => generate(override)}
           onUpload={upload}
           region={region}
           busy={submitting}
+          autoExpand={autoExpand}
+          setAutoExpand={setAutoExpand}
         />
       </div>
 
       {showChat && (
         <ChatPanel
+          onClose={() => setShowChat(false)}
           presetId={presetId}
           setPresetId={setPresetId}
           purpose={purpose}
           imageIds={editImageIds(composer)}
+          video={videoContext(composer)}
           onUsePrompt={applyChatPrompt}
         />
       )}
@@ -523,3 +556,5 @@ export default function StudioPage() {
     </div>
   );
 }
+
+const isPhone = () => window.matchMedia("(max-width: 767px)").matches;

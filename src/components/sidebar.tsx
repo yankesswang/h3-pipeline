@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, Boxes, Images, Layers, ScrollText, Settings, Sparkles } from "lucide-react";
+import { Activity, Boxes, Clapperboard, ImagePlus, Images, Layers, ScrollText, Settings, Sparkles, SquareStack } from "lucide-react";
 import { useStudio } from "./studio-provider";
 
 const NAV = [
-  { href: "/", label: "創作", icon: Sparkles },
+  { href: "/", label: "圖片", icon: Sparkles },
+  { href: "/image", label: "生圖", icon: ImagePlus },
+  { href: "/video", label: "影片", icon: Clapperboard },
   { href: "/gallery", label: "圖庫", icon: Images },
+  { href: "/batch", label: "批次", icon: SquareStack },
   { href: "/tools", label: "工具", icon: Boxes },
   { href: "/loras", label: "LoRA", icon: Layers },
   { href: "/presets", label: "Prompt 庫", icon: ScrollText },
@@ -21,15 +24,16 @@ export function Sidebar() {
   const active = jobs.filter((j) => j.status === "queued" || j.status === "running").length;
 
   return (
-    <nav className="flex w-[72px] shrink-0 flex-col items-center gap-1 border-r border-line bg-panel py-4">
-      <div className="mb-4 grid size-9 place-items-center rounded-xl bg-accent-strong font-semibold text-white">C</div>
+    // Phones: a scrolling tab bar along the bottom; wider screens: a rail on the left.
+    <nav className="flex shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-panel px-1 pb-[env(safe-area-inset-bottom)] md:w-[72px] md:flex-col md:overflow-x-visible md:overflow-y-auto md:border-t-0 md:border-r md:px-0 md:py-4">
+      <div className="mb-4 hidden size-9 shrink-0 place-items-center rounded-xl bg-accent-strong font-semibold text-white md:grid">C</div>
       {NAV.map(({ href, label, icon: Icon }) => {
         const on = href === "/" ? path === "/" : path.startsWith(href);
         return (
           <Link
             key={href}
             href={href}
-            className={`relative flex w-14 flex-col items-center gap-1 rounded-lg py-2 text-[11px] transition ${
+            className={`relative flex w-14 shrink-0 flex-col items-center gap-1 rounded-lg py-2 text-[11px] whitespace-nowrap transition ${
               on ? "bg-raised text-fg" : "text-muted hover:bg-raised/60 hover:text-fg"
             }`}
           >
@@ -53,7 +57,7 @@ export function Sidebar() {
           </Link>
         );
       })}
-      <div className="mt-auto flex flex-col items-center gap-2 text-[10px] text-faint">
+      <div className="flex shrink-0 items-center gap-2 px-2 text-[10px] text-faint md:mt-auto md:flex-col md:px-0">
         <StatusDot ok={status?.comfy} label="ComfyUI" />
         <StatusDot ok={status?.llm} label="LLM" />
       </div>

@@ -25,6 +25,7 @@ Data (SQLite, PNGs, masks, the SAM model) lives in `./data`.
 | --- | --- |
 | 創作 `/` | Generate, edit, select regions, outpaint, chat with the prompt assistant |
 | 圖庫 `/gallery` | Every image with how it was made; reuse or edit any of them |
+| 批次 `/batch` | One edit instruction applied to every image in a folder or a gallery selection |
 | 工具 `/tools` | Imported ComfyUI workflows as forms |
 | LoRA `/loras` | LoRAs ComfyUI can see, with trigger-word notes and default strengths |
 | Prompt 庫 `/presets` | System prompts for generating, edit instructions and video |
@@ -76,6 +77,19 @@ the 17k+5 grid) but choosing the mode in code instead of with switches. Two
 extra SaveImage nodes keep the first and last frames, so posters and
 continuation need no video decoding. Videos are stored as `<id>.mp4` with
 `<id>.png` (first frame) and `<id>.last.png`. About 50 s for 2–3 s at 0.4 MP.
+
+## Batch edit
+
+批次 does what ComfyUI's *Qwen Image 2.1 batch edit* workflow does (its
+`LoadImagesFromPath` node): pick a folder on this machine (`~` works) and every
+PNG / JPG / WEBP in it, in file name order, gets the same instruction. Gallery
+images and multi-file uploads work too. Each image is imported into the gallery
+and becomes its own `qwen21-edit` job (`src/lib/server/batch.ts`), so results
+join the version tree, show progress one by one, and can be cancelled as a
+batch. The whole batch shares one seed; size defaults to the workflow's 1 MP
+budget (`resolution: 1024`), or keeps each image's own size. Results can also be
+written to a folder as `<original name>.png` (default `<folder>/edited`), never
+overwriting existing files. Up to 200 images per batch.
 
 ## Imported workflows
 

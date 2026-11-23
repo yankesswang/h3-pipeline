@@ -14,14 +14,33 @@ export interface Segment {
 }
 
 /** A horizontal part-to-whole bar: segments, then the unused remainder as track. */
-export function StackedBar({ segments, total, format }: { segments: Segment[]; total: number; format: (v: number) => string }) {
+export function StackedBar({
+  segments,
+  total,
+  format,
+  height = 20,
+  legend = true,
+}: {
+  segments: Segment[];
+  total: number;
+  format: (v: number) => string;
+  height?: number;
+  /** Off when a list next to the bar already names each segment. */
+  legend?: boolean;
+}) {
   const [hover, setHover] = useState<string | null>(null);
   const shown = segments.filter((s) => s.value > 0.5);
   const free = Math.max(0, total - shown.reduce((a, s) => a + s.value, 0));
   const hovered = shown.find((s) => s.id === hover);
   return (
     <div className="flex flex-col gap-2">
-      <div className="relative flex h-5 w-full gap-[2px] overflow-hidden rounded-md" onPointerLeave={() => setHover(null)}>
+      <div
+        className="relative flex w-full gap-[2px] overflow-hidden rounded-md"
+        style={{ height }}
+        role="img"
+        aria-label={[...shown.map((s) => `${s.label} ${format(s.value)}`), `可用 ${format(free)}`].join("，")}
+        onPointerLeave={() => setHover(null)}
+      >
         {shown.map((s) => (
           <div
             key={s.id}
@@ -37,7 +56,7 @@ export function StackedBar({ segments, total, format }: { segments: Segment[]; t
           </div>
         )}
       </div>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+      {legend && <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
         {shown.map((s) => (
           <span key={s.id} className="flex items-center gap-1.5 text-muted" onPointerEnter={() => setHover(s.id)} onPointerLeave={() => setHover(null)}>
             <span className="size-2.5 rounded-sm" style={{ background: s.color }} />
@@ -49,7 +68,7 @@ export function StackedBar({ segments, total, format }: { segments: Segment[]; t
           <span className="size-2.5 rounded-sm bg-line" />
           可用 <span className="text-fg tabular-nums">{format(free)}</span>
         </span>
-      </div>
+      </div>}
     </div>
   );
 }
@@ -59,6 +78,8 @@ export interface TimeSeries<T> {
   label: string;
   color: string;
   get: (d: T) => number | null;
+  /** Dashed line, so two line series differ by more than color. */
+  dash?: boolean;
 }
 
 const WINDOW = 5 * 60_000;
@@ -140,7 +161,13 @@ export function TimeChart<T extends { t: number }>({
         <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
           {series.map((s) => (
             <span key={s.id} className="flex items-center gap-1.5">
-              <span className={stacked ? "size-2.5 rounded-sm" : "h-0.5 w-3 rounded"} style={{ background: s.color }} />
+              {stacked ? (
+                <span className="size-2.5 rounded-sm" style={{ background: s.color }} />
+              ) : (
+                <svg width={14} height={4} aria-hidden>
+                  <line x1={1} x2={13} y1={2} y2={2} stroke={s.color} strokeWidth={2} strokeDasharray={s.dash ? "3 3" : undefined} strokeLinecap="round" />
+                </svg>
+              )}
               {s.label}
             </span>
           ))}
@@ -150,13 +177,13 @@ export function TimeChart<T extends { t: number }>({
         {ticks.map((v) => (
           <g key={v}>
             <line x1={pad.l} x2={pad.l + w} y1={y(v)} y2={y(v)} stroke="var(--color-line)" strokeWidth={1} />
-            <text x={pad.l - 6} y={y(v)} dy="0.32em" textAnchor="end" className="fill-faint text-[10px] tabular-nums">
+            <text x={pad.l - 6} y={y(v)} dy="0.32em" textAnchor="end" className="fill-faint text-[11px] tabular-nums">
               {format(v)}
             </text>
           </g>
         ))}
         {minutes.map((m) => (
-          <text key={m} x={pad.l + w - (m / 5) * w} y={height - 6} textAnchor={m === 0 ? "end" : m === 5 ? "start" : "middle"} className="fill-faint text-[10px]">
+          <text key={m} x={pad.l + w - (m / 5) * w} y={height - 6} textAnchor={m === 0 ? "end" : m === 5 ? "start" : "middle"} className="fill-faint text-[11px]">
             {m === 0 ? "現在" : `${m} 分前`}
           </text>
         ))}
@@ -176,7 +203,7 @@ export function TimeChart<T extends { t: number }>({
                 <path d={path(hi)} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" />
               </g>
             ) : (
-              <path key={s.id} d={path(hi)} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+              <path key={s.id} d={path(hi)} fill="none" stroke={s.color} strokeWidth={2} strokeDasharray={s.dash ? "5 4" : undefined} strokeLinejoin="round" strokeLinecap="round" />
             ),
           )}
         {hd && (
@@ -200,7 +227,7 @@ export function TimeChart<T extends { t: number }>({
               <div key={s.id} className="flex items-center gap-2">
                 <span className="size-2 rounded-sm" style={{ background: s.color }} />
                 <span className="text-muted">{s.label}</span>
-                <span className="ml-auto pl-3 text-fg tabular-nums">{v === null ? "—" : format(v)}</span>
+                <span className="ml-auto pl-3 text-fg tabular-nums">{v === null ? "-" : format(v)}</span>
               </div>
             );
           })}

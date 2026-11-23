@@ -57,6 +57,11 @@ export async function beforeGenerate() {
   state.llmLoaded = false;
 }
 
+/** An LLM was loaded outside an LLM call (e.g. from the monitor), so the next generation should unload it. */
+export function noteLlmLoaded() {
+  state.llmLoaded = true;
+}
+
 export function afterGenerate() {
   state.generating = false;
 }

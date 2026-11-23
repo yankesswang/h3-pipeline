@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { nanoid } from "nanoid";
-import type { ImageRecord, ModelFamily, Preset, PresetPurpose } from "@/lib/shared/types";
+import type { ImageRecord, MediaKind, ModelFamily, Preset, PresetPurpose } from "@/lib/shared/types";
 import { db, IMAGE_DIR, THUMB_DIR } from "./db";
+import { BUILTIN_PRESETS } from "./presets-builtin";
 
 // ---- images ----------------------------------------------------------------
 
@@ -41,7 +42,7 @@ function toImage(r: ImageRow): ImageRecord {
  * Every record has `<id>.png`: the image itself, or a video's first frame.
  * Videos add `<id>.mp4` and `<id>.last.png` (the last frame, for continuing).
  */
-export function insertImage(img: ImageRecord, png: Buffer, video?: { mp4: Buffer; last: Buffer }): ImageRecord {
+export function insertImage(img: ImageRecord, png: Buffer, video?: { mp4: Buffer; last: Buffer }, hash?: string): ImageRecord {
   fs.writeFileSync(path.join(IMAGE_DIR, `${img.id}.png`), png);
   const file = video ? `${img.id}.mp4` : `${img.id}.png`;
   if (video) {
@@ -49,8 +50,8 @@ export function insertImage(img: ImageRecord, png: Buffer, video?: { mp4: Buffer
     fs.writeFileSync(path.join(IMAGE_DIR, `${img.id}.last.png`), video.last);
   }
   db.prepare(
-    `INSERT INTO images (id, tool, params, origin, parent_id, width, height, file, favorite, created_at, media, duration)
-     VALUES (@id, @tool, @params, @origin, @parent_id, @width, @height, @file, 0, @created_at, @media, @duration)`,
+    `INSERT INTO images (id, tool, params, origin, parent_id, width, height, file, favorite, created_at, media, duration, hash)
+     VALUES (@id, @tool, @params, @origin, @parent_id, @width, @height, @file, 0, @created_at, @media, @duration, @hash)`,
   ).run({
     id: img.id,
     tool: img.tool,
@@ -63,11 +64,20 @@ export function insertImage(img: ImageRecord, png: Buffer, video?: { mp4: Buffer
     created_at: img.createdAt,
     media: img.media,
     duration: img.duration ?? null,
+    hash: hash ?? null,
   });
   return img;
 }
 
-export function listImages(opts: { before?: number; limit: number; favorites?: boolean; q?: string }) {
+/** `source`: images made here ("generated") or brought in from outside ("upload"); `media`: stills or clips. */
+export function listImages(opts: {
+  before?: number;
+  limit: number;
+  favorites?: boolean;
+  q?: string;
+  source?: "generated" | "upload";
+  media?: MediaKind;
+}) {
   const where: string[] = [];
   const args: Record<string, unknown> = { limit: opts.limit };
   if (opts.before) {
@@ -75,6 +85,11 @@ export function listImages(opts: { before?: number; limit: number; favorites?: b
     args.before = opts.before;
   }
   if (opts.favorites) where.push("favorite = 1");
+  if (opts.source) where.push(opts.source === "upload" ? "tool = 'upload'" : "tool != 'upload'");
+  if (opts.media) {
+    where.push("media = @media");
+    args.media = opts.media;
+  }
   if (opts.q) {
     where.push("params LIKE @q");
     args.q = `%${opts.q}%`;
@@ -82,6 +97,22 @@ export function listImages(opts: { before?: number; limit: number; favorites?: b
   const sql = `SELECT * FROM images ${where.length ? "WHERE " + where.join(" AND ") : ""}
                ORDER BY created_at DESC LIMIT @limit`;
   return (db.prepare(sql).all(args) as ImageRow[]).map(toImage);
+}
+
+/** An earlier upload with exactly these pixels. */
+export function findUploadByHash(hash: string) {
+  const r = db.prepare("SELECT * FROM images WHERE tool = 'upload' AND hash = ? ORDER BY created_at LIMIT 1").get(hash) as
+    | ImageRow
+    | undefined;
+  return r && toImage(r);
+}
+
+/** Uploads from before hashes were kept. */
+export const unhashedUploads = () =>
+  (db.prepare("SELECT id FROM images WHERE tool = 'upload' AND hash IS NULL").all() as { id: string }[]).map((r) => r.id);
+
+export function setHash(id: string, hash: string) {
+  db.prepare("UPDATE images SET hash = ? WHERE id = ?").run(hash, id);
 }
 
 export function getImage(id: string) {
@@ -184,14 +215,26 @@ export function createPreset(p: PresetInput) {
   return getPreset(id)!;
 }
 
-/** Built-in presets are read-only; returns undefined for them. */
+/** Built-in presets can be edited too; once edited they are no longer refreshed on start. */
 export function updatePreset(id: string, p: PresetInput) {
   const res = db
-    .prepare(
-      "UPDATE presets SET name = ?, family = ?, purpose = ?, content = ?, updated_at = ? WHERE id = ? AND builtin = 0",
-    )
+    .prepare("UPDATE presets SET name = ?, family = ?, purpose = ?, content = ?, updated_at = ? WHERE id = ?")
     .run(p.name, p.family, p.purpose, p.content, Date.now(), id);
   return res.changes ? getPreset(id) : undefined;
+}
+
+/** Put an edited built-in preset back to the shipped version. */
+export function resetPreset(id: string) {
+  const b = BUILTIN_PRESETS.find((p) => p.id === id);
+  if (!b) return undefined;
+  db.prepare("UPDATE presets SET name = ?, family = ?, purpose = ?, content = ?, updated_at = 0 WHERE id = ?").run(
+    b.name,
+    b.family,
+    b.purpose,
+    b.content,
+    id,
+  );
+  return getPreset(id);
 }
 
 export function deletePreset(id: string) {

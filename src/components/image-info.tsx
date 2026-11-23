@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Clapperboard, Copy, Download, Heart, Pencil, Repeat, SkipForward, Trash2 } from "lucide-react";
+import { Check, ChevronDown, Clapperboard, Copy, Download, Heart, Pencil, Repeat, SkipForward, Trash2 } from "lucide-react";
 import { api, imageUrl } from "@/lib/client/api";
 import type { ImageRecord } from "@/lib/shared/types";
+import { speedOf, VIDEO_SPEEDS } from "@/lib/tools/video";
 import { Button, IconButton } from "./ui";
 import { useStudio } from "./studio-provider";
 
@@ -15,6 +16,8 @@ export function ImageInfo({
   onMakeVideo,
   onContinue,
   onDeleted,
+  detailsOpen = true,
+  onToggleDetails,
 }: {
   image: ImageRecord;
   onReuse: (img: ImageRecord, lockSeed: boolean) => void;
@@ -22,6 +25,9 @@ export function ImageInfo({
   onMakeVideo: (img: ImageRecord) => void;
   onContinue: (video: ImageRecord) => void;
   onDeleted: (id: string) => void;
+  /** With `onToggleDetails`, the prompt and parameters fold away behind a 資訊 toggle. */
+  detailsOpen?: boolean;
+  onToggleDetails?: () => void;
 }) {
   const { patchImage, removeImage } = useStudio();
   const [copied, setCopied] = useState(false);
@@ -91,7 +97,14 @@ export function ImageInfo({
         </div>
       </div>
 
-      {uploaded ? (
+      {onToggleDetails && (
+        <button onClick={onToggleDetails} className="flex items-center gap-1 self-start text-faint hover:text-fg" title="資訊 (i)">
+          <ChevronDown className={`size-3.5 transition ${detailsOpen ? "" : "-rotate-90"}`} />
+          資訊
+        </button>
+      )}
+
+      {!detailsOpen ? null : uploaded ? (
         <p className="text-muted">
           從外部上傳的圖片（{image.width}×{image.height}）
         </p>
@@ -156,7 +169,22 @@ export function ImageInfo({
           <Dt>Steps / CFG</Dt>
           <Dd>
             {p.steps} / {p.cfg}
+            {isVideo && ` · ${VIDEO_SPEEDS[speedOf(p.video)].label}`}
           </Dd>
+          {p.sampler && (
+            <>
+              <Dt>Sampler</Dt>
+              <Dd>
+                {p.sampler} · {p.scheduler}
+              </Dd>
+            </>
+          )}
+          {p.denoise !== undefined && (
+            <>
+              <Dt>重繪強度</Dt>
+              <Dd>{p.denoise}</Dd>
+            </>
+          )}
           <Dt>Seed</Dt>
           <Dd className="font-mono">{p.seed}</Dd>
           {p.negativePrompt && (

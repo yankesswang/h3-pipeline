@@ -1,9 +1,10 @@
 import { EventEmitter } from "node:events";
 import { nanoid } from "nanoid";
 import fs from "node:fs";
+import path from "node:path";
 import type { GenerateParams, Job, PromptOrigin, ServerEvent, ToolId } from "@/lib/shared/types";
 import { buildPrompt, type ApiWorkflow, type Tool } from "@/lib/tools/types";
-import { buildVideoWorkflow, framesFor, VIDEO_OUTPUT } from "@/lib/tools/video";
+import { buildVideoWorkflow, framesFor, VIDEO_OUTPUT, speedOf } from "@/lib/tools/video";
 import { comfy, type ComfyMessage } from "./comfy";
 import { afterGenerate, beforeGenerate } from "./gpu";
 import { pngSize } from "./images";
@@ -73,6 +74,11 @@ export function listJobs() {
   return q.jobs;
 }
 
+/** Whether anything is generating or waiting to. */
+export function busy() {
+  return q.running || q.jobs.some((j) => j.status === "queued" || j.status === "running");
+}
+
 export function enqueue(toolId: ToolId, params: GenerateParams, origin?: PromptOrigin): Job {
   resolveTool(toolId); // throws for unknown or deleted tools
   if (toolId === "minimax-h3-video") {
@@ -103,12 +109,26 @@ export function enqueue(toolId: ToolId, params: GenerateParams, origin?: PromptO
     createdAt: Date.now(),
   };
   q.jobs.push(job);
-  // Keep finished jobs around briefly so the UI can show what just happened.
-  const finished = q.jobs.filter((j) => j.status !== "queued" && j.status !== "running");
-  if (finished.length > 30) q.jobs = q.jobs.filter((j) => !finished.slice(0, finished.length - 30).includes(j));
+  prune();
   emit({ type: "job", job });
   void pump();
   return job;
+}
+
+/**
+ * Keep finished jobs around briefly so the UI can show what just happened:
+ * the last 30 single jobs, and every job of the last 5 batches.
+ */
+function prune() {
+  const finished = (j: Job) => j.status !== "queued" && j.status !== "running";
+  const singles = q.jobs.filter((j) => !j.params.batch && finished(j));
+  const batches = [...new Set(q.jobs.filter((j) => j.params.batch).map((j) => j.params.batch!.id))];
+  const oldBatches = new Set(batches.slice(0, -5));
+  const drop = new Set([
+    ...singles.slice(0, Math.max(0, singles.length - 30)),
+    ...q.jobs.filter((j) => j.params.batch && oldBatches.has(j.params.batch.id) && finished(j)),
+  ]);
+  if (drop.size) q.jobs = q.jobs.filter((j) => !drop.has(j));
 }
 
 export async function cancel(jobId: string) {
@@ -154,15 +174,26 @@ async function run(job: Job) {
         ...job.params,
         prompt: region?.prompt ?? job.params.prompt,
         resolution: editResolution(job.params),
+        // The grown canvas has nothing worth keeping, so outpainting always re-draws fully.
+        denoise: job.params.outpaint ? undefined : job.params.denoise,
       };
       prompt = buildPrompt(tool, values, images, job.params.loras);
       finishers.set(job, region?.finish);
     }
+    const target = job.tool === "minimax-h3-video" ? "minimax-video" : job.tool.startsWith("custom:") ? `custom:${tool.name}` : "qwen-image";
+    if (comfy.resident && comfy.resident !== target) {
+      update(job, { stage: "等待 ComfyUI 完成其他任務" });
+      if (await comfy.hasQueuedWork()) throw new Error("ComfyUI 仍有其他任務，完成後請重試模型切換");
+      update(job, { stage: "釋放上一個模型" });
+      await comfy.free();
+    }
+    update(job, { stage: "載入模型" });
     const promptId = await comfy.submit(prompt);
     q.comfyPromptIds.set(job.id, promptId);
     update(job, { stage: "排入 ComfyUI" });
     const outcome = await waitFor(job, promptId, prompt);
     if (outcome === "interrupted") return update(job, { status: "cancelled", stage: undefined });
+    comfy.resident = target;
     const image = await collect(job, tool, promptId, finishers.get(job));
     update(job, { status: "done", progress: 1, stage: undefined, imageId: image.id });
   } catch (e) {
@@ -183,7 +214,13 @@ async function videoWorkflow(p: GenerateParams) {
     if (!file) throw new Error(`找不到圖片 ${id}`);
     return comfy.upload(fs.readFileSync(file), `${id}.png`);
   };
-  const [firstFrame, lastFrame] = await Promise.all([upload(v.firstFrameId), upload(v.lastFrameId)]);
+  // Keyframes only make sense after a first frame, like the end frame.
+  const keys = v.firstFrameId ? (v.keyframes ?? []) : [];
+  const [firstFrame, lastFrame, ...keyFiles] = await Promise.all([
+    upload(v.firstFrameId),
+    upload(v.lastFrameId),
+    ...keys.map((k) => upload(k.imageId)),
+  ]);
   return buildVideoWorkflow({
     prompt: p.prompt,
     seed: p.seed,
@@ -193,6 +230,11 @@ async function videoWorkflow(p: GenerateParams) {
     height: p.height,
     firstFrame,
     lastFrame,
+    keyframes: keys.map((k, i) => ({ file: keyFiles[i]!, at: k.at })),
+    speed: speedOf(v),
+    steps: p.steps,
+    sampler: p.sampler,
+    scheduler: p.scheduler,
   });
 }
 
@@ -248,9 +290,10 @@ async function uploadInputs(p: GenerateParams, preparedSource?: Buffer): Promise
   ]);
 }
 
-/** 0 keeps every image at its own size (uploads are already capped at 4 MP). */
+/** 0 keeps every image at its own size (uploads are already capped at 4 MP). Region edits pick their own size. */
 function editResolution(p: GenerateParams) {
-  return p.sourceImageId ? 0 : undefined;
+  if (!p.sourceImageId) return undefined;
+  return p.maskId || p.outpaint ? 0 : (p.resolution ?? 0);
 }
 
 /** Resolve when ComfyUI finishes the prompt. Websocket for progress, history polling as a backstop. */
@@ -357,5 +400,20 @@ async function collect(job: Job, tool: Tool, promptId: string, finish?: (out: Bu
     png,
   );
   emit({ type: "image", image });
+  const batch = job.params.batch;
+  if (batch?.saveTo) {
+    try {
+      saveCopy(batch.saveTo, batch.name ?? image.id, png);
+    } catch (e) {
+      update(job, { error: `已存進圖庫，但寫不進 ${batch.saveTo}：${e instanceof Error ? e.message : e}` });
+    }
+  }
   return image;
+}
+
+/** Write a batch result as `<name>.png`, without overwriting anything already there. */
+function saveCopy(dir: string, name: string, png: Buffer) {
+  let file = path.join(dir, `${name}.png`);
+  for (let n = 2; fs.existsSync(file); n++) file = path.join(dir, `${name}_${n}.png`);
+  fs.writeFileSync(file, png);
 }

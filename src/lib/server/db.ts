@@ -42,11 +42,12 @@ function open() {
     );
   `);
   migrate(db);
-  // Built-in presets are refreshed on every start; users edit copies of them.
+  // Built-in presets are refreshed on every start, unless the user edited them (updated_at > 0).
   const upsert = db.prepare(
     `INSERT INTO presets (id, name, family, purpose, content, builtin, updated_at) VALUES (?, ?, ?, ?, ?, 1, 0)
      ON CONFLICT(id) DO UPDATE SET name = excluded.name, family = excluded.family,
-       purpose = excluded.purpose, content = excluded.content`,
+       purpose = excluded.purpose, content = excluded.content
+     WHERE presets.updated_at = 0`,
   );
   for (const p of BUILTIN_PRESETS) upsert.run(p.id, p.name, p.family, p.purpose, p.content);
   return db;
@@ -62,6 +63,9 @@ function migrate(db: Database.Database) {
     db.exec("ALTER TABLE images ADD COLUMN media TEXT NOT NULL DEFAULT 'image'");
     db.exec("ALTER TABLE images ADD COLUMN duration REAL");
   }
+  // Uploads are found again by the SHA-256 of their pixels, so the same picture is stored once.
+  if (!cols("images").has("hash")) db.exec("ALTER TABLE images ADD COLUMN hash TEXT");
+  db.exec("CREATE INDEX IF NOT EXISTS images_hash ON images(hash)");
   db.exec(`
     CREATE TABLE IF NOT EXISTS tools (
       id TEXT PRIMARY KEY,

@@ -99,7 +99,7 @@ export default function ImportToolPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-4xl flex-col gap-5 p-8">
+      <div className="mx-auto flex max-w-4xl flex-col gap-5 p-4 md:p-8">
         <header className="flex items-center gap-3">
           <Link href="/tools" className="text-muted hover:text-fg">
             <ArrowLeft className="size-5" />
@@ -165,7 +165,7 @@ export default function ImportToolPage() {
               </p>
             )}
 
-            <section className="grid grid-cols-[1fr_1fr] gap-3 rounded-xl border border-line bg-panel p-5">
+            <section className="grid grid-cols-1 gap-3 rounded-xl border border-line bg-panel p-4 sm:grid-cols-2 md:p-5">
               <label className="flex flex-col gap-1 text-xs text-muted">
                 工具名稱
                 <input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：Flux 人像" className={inputCls} />
@@ -199,11 +199,11 @@ export default function ImportToolPage() {
                       #{node} {cs[0].nodeTitle}
                       {cs[0].nodeTitle !== cs[0].classType && <span className="ml-1 text-faint/70">（{cs[0].classType}）</span>}
                     </h3>
-                    <div className="flex flex-col">
+                    <div className="flex flex-col overflow-x-auto">
                       {cs.map((c) => {
                         const p = picked[c.key];
                         return (
-                          <div key={c.key} className={`grid grid-cols-[auto_9rem_1fr_9rem_minmax(0,12rem)] items-center gap-3 rounded-lg px-2 py-1 ${p?.on ? "bg-accent-strong/10" : ""}`}>
+                          <div key={c.key} className={`grid min-w-[640px] grid-cols-[auto_9rem_1fr_9rem_minmax(0,12rem)] items-center gap-3 rounded-lg px-2 py-1 ${p?.on ? "bg-accent-strong/10" : ""}`}>
                             <input
                               type="checkbox"
                               checked={p?.on ?? false}
