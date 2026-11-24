@@ -63,6 +63,25 @@ Click-to-select runs SAM 2.1 (small) in its own Python process, outside
 ComfyUI's queue, so it answers in ~50 ms even while an image is generating.
 The model (~180 MB) downloads on first use.
 
+## Image models
+
+The composer (and the 圖片 page) switches between two image models; new
+sessions start on MiniMax H3 Image.
+
+- **H3 Image** (`src/lib/tools/h3-image.ts`), from ComfyUI's
+  `image_minimax_h3_image_t2i` template without its prompt expander:
+  `minimax_h3_image_pruned_int8_convrot` DiT, the nvfp4 Qwen3-VL 32B encoder
+  shared with H3 video, `minimax_h3_image_vae_fp16`. Distilled: always 6 steps,
+  CFG 1, no negative prompt, no LoRA; tuned for 4 MP and up. Edits attach the
+  pictures to `MiniMaxH3ImageConditioning` (up to 16) and the canvas follows
+  `<Picture 1>`; the composer's `<imageN>` tokens are rewritten to
+  `<Picture N>`. Mask edits and outpainting go through the same crop/stitch path
+  as Qwen. `scripts/test_minimax_h3_image.py` runs one image straight through
+  the ComfyUI API.
+- **Qwen 2.1**: adjustable steps, CFG, sampler, LoRA and negative prompt.
+
+Images made before the switch have no `params.model` and count as Qwen.
+
 ## Video
 
 The composer's 圖片 / 影片 switch makes MiniMax H3 videos (with audio) instead
@@ -122,3 +141,4 @@ LLM calls send `reasoning_effort: "none"` by default (≈10× faster on Qwen 3.5
 3. **M3** selection canvas: brush, SAM click-select, local edits, outpaint
 4. **M4** workflow import with a field-mapping editor, LoRA library and stacking
 5. **Video** MiniMax H3 text/image to video with sound, clip continuation
+6. **H3 Image** MiniMax H3 Image as a second image model (generate, edit, regions)

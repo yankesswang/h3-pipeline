@@ -1,8 +1,9 @@
 import type { BuiltinToolId } from "@/lib/shared/types";
 import type { ApiWorkflow, Tool } from "./types";
+import { h3ImageEdit, h3ImageTextToImage } from "./h3-image";
 import { minimaxH3Video } from "./video";
 
-// Both tools are built from the official Qwen Image 2.1 templates with the
+// The Qwen tools are built from the official Qwen Image 2.1 templates with the
 // GGUF loader, flattened out of their subgraphs into API format.
 
 const loaders: ApiWorkflow = {
@@ -99,5 +100,7 @@ export const qwen21Edit: Tool = {
 export const builtinTools: Record<BuiltinToolId, Tool> = {
   "qwen21-t2i": qwen21TextToImage,
   "qwen21-edit": qwen21Edit,
+  "h3-image-t2i": h3ImageTextToImage,
+  "h3-image-edit": h3ImageEdit,
   "minimax-h3-video": minimaxH3Video,
 };

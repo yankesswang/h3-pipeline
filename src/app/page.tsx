@@ -93,6 +93,8 @@ export default function StudioPage() {
         setComposer((s) => ({
           ...s,
           ...saved.composer,
+          // Saved before H3 Image existed: start on it, at its size.
+          ...(saved.composer?.model ? {} : { model: s.model, megapixels: s.megapixels }),
           // Saved before speeds existed (its steps were for 8-step Turbo) or before pi-H3 became
           // the default: take the new default's speed and steps.
           video: {
@@ -135,10 +137,10 @@ export default function StudioPage() {
   }, []);
 
   useEffect(() => {
-    const { aspect, megapixels, customSize, steps, cfg, sampler, scheduler, denoise, count, negativePrompt, loras } = composer;
+    const { model, aspect, megapixels, customSize, steps, cfg, sampler, scheduler, denoise, count, negativePrompt, loras } = composer;
     const { seconds, speed, sampler: vSampler, scheduler: vScheduler } = composer.video;
     const video = { seconds, megapixels: composer.video.megapixels, speed, steps: composer.video.steps, sampler: vSampler, scheduler: vScheduler };
-    const saved = { aspect, megapixels, customSize, steps, cfg, sampler, scheduler, denoise, count, negativePrompt, loras, video };
+    const saved = { model, aspect, megapixels, customSize, steps, cfg, sampler, scheduler, denoise, count, negativePrompt, loras, video };
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify({ composer: saved, presetIds, showChat, autoExpand, speedRev: VIDEO_SPEED_REV }));
     } catch {}

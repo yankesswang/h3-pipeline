@@ -1,7 +1,8 @@
 import type { AspectId } from "@/lib/shared/sizes";
 import { randomSeed, sizeFor } from "@/lib/shared/sizes";
+import { H3_STEPS } from "@/lib/tools/h3-image";
 import { DEFAULT_VIDEO_SPEED, speedOf, VIDEO_SPEEDS, videoSize } from "@/lib/tools/video";
-import type { GenerateParams, ImageRecord, LoraUse, PresetPurpose, PromptOrigin, VideoContext, VideoSpeed } from "@/lib/shared/types";
+import type { GenerateParams, ImageModel, ImageRecord, LoraUse, PresetPurpose, PromptOrigin, VideoContext, VideoSpeed } from "@/lib/shared/types";
 
 export interface Pads {
   left: number;
@@ -45,6 +46,8 @@ export interface Size {
 }
 
 export interface ComposerState {
+  /** Which model makes and edits images. */
+  model: ImageModel;
   prompt: string;
   negativePrompt: string;
   aspect: AspectId;
@@ -72,10 +75,11 @@ export interface ComposerState {
 }
 
 export const initialComposer: ComposerState = {
+  model: "h3-image",
   prompt: "",
   negativePrompt: "",
   aspect: "1:1",
-  megapixels: 1,
+  megapixels: 4,
   customSize: null,
   steps: 40,
   cfg: 1,
@@ -144,7 +148,20 @@ export function toParams(s: ComposerState): GenerateParams {
   const size = s.edit
     ? { width: s.edit.source.width + o.left + o.right, height: s.edit.source.height + o.top + o.bottom }
     : imageSize(s);
+  if (s.model === "h3-image")
+    return {
+      model: "h3-image",
+      prompt: s.prompt.trim(),
+      negativePrompt: "",
+      ...size,
+      steps: H3_STEPS,
+      cfg: 1,
+      seed: s.seedLocked ? s.seed : randomSeed(),
+      ...(s.edit ? { sourceImageId: s.edit.source.id, refImageIds: s.edit.refs.map((r) => r.id) } : {}),
+      ...(s.edit && hasPads(s.edit.outpaint) ? { outpaint: s.edit.outpaint } : {}),
+    };
   return {
+    model: "qwen21",
     prompt: s.prompt.trim(),
     negativePrompt: s.negativePrompt,
     ...size,
@@ -213,13 +230,16 @@ export function fromImage(
         last: p.video.lastFrameId ? lookup(p.video.lastFrameId) : undefined,
       },
     };
+  const model = p.model ?? "qwen21";
   return {
+    model,
     prompt: p.prompt,
     negativePrompt: p.negativePrompt,
     aspect,
     megapixels,
     customSize: preset.width === p.width && preset.height === p.height ? null : { width: p.width, height: p.height },
-    steps: p.steps || 40,
+    // H3 runs a fixed 6 steps; keep Qwen's own default for when the model is switched back.
+    steps: model === "h3-image" ? initialComposer.steps : p.steps || 40,
     cfg: p.cfg || 1,
     sampler: p.sampler ?? initialComposer.sampler,
     scheduler: p.scheduler ?? initialComposer.scheduler,
@@ -262,6 +282,12 @@ export function startEdit(s: ComposerState, img: ImageRecord): ComposerState {
     origin: keepText ? s.origin : undefined,
     edit: { source: img, refs: s.edit?.refs.filter((r) => r.id !== img.id) ?? [] },
   };
+}
+
+/** Switch the image model, at the size each works best at (H3 is tuned for 4 MP and up). */
+export function setModel(s: ComposerState, model: ImageModel): ComposerState {
+  if (model === s.model) return s;
+  return { ...s, model, megapixels: model === "h3-image" ? 4 : 1 };
 }
 
 /** Switch between making images and videos; an image being edited becomes the video's first frame. */

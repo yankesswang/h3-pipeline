@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Check, ChevronDown, Clapperboard, Copy, Download, Heart, Pencil, Repeat, SkipForward, Trash2 } from "lucide-react";
 import { api, imageUrl } from "@/lib/client/api";
-import type { ImageRecord } from "@/lib/shared/types";
+import { IMAGE_MODELS, isEditTool, type ImageRecord } from "@/lib/shared/types";
 import { speedOf, VIDEO_SPEEDS } from "@/lib/tools/video";
 import { Button, IconButton } from "./ui";
 import { useStudio } from "./studio-provider";
@@ -36,7 +36,7 @@ export function ImageInfo({
   const o = image.origin;
   const uploaded = image.tool === "upload";
   const customTool = image.tool.startsWith("custom:") ? image.tool.slice("custom:".length) : undefined;
-  const edited = image.tool === "qwen21-edit";
+  const edited = isEditTool(image.tool);
   const isVideo = image.media === "video";
 
   async function toggleFavorite() {
@@ -164,6 +164,12 @@ export function ImageInfo({
                 {image.duration?.toFixed(1)} 秒 · {p.video?.firstFrameId ? "圖片生成" : "文字生成"}
                 {p.video?.lastFrameId ? "（有結尾幀）" : ""}
               </Dd>
+            </>
+          )}
+          {!isVideo && !uploaded && !customTool && (
+            <>
+              <Dt>模型</Dt>
+              <Dd>{IMAGE_MODELS[p.model ?? "qwen21"].label}</Dd>
             </>
           )}
           <Dt>Steps / CFG</Dt>

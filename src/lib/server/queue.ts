@@ -2,8 +2,9 @@ import { EventEmitter } from "node:events";
 import { nanoid } from "nanoid";
 import fs from "node:fs";
 import path from "node:path";
-import type { GenerateParams, Job, PromptOrigin, ServerEvent, ToolId } from "@/lib/shared/types";
+import { isEditTool, type GenerateParams, type Job, type PromptOrigin, type ServerEvent, type ToolId } from "@/lib/shared/types";
 import { buildPrompt, type ApiWorkflow, type Tool } from "@/lib/tools/types";
+import { h3EditPrompt } from "@/lib/tools/h3-image";
 import { buildVideoWorkflow, framesFor, VIDEO_OUTPUT, speedOf } from "@/lib/tools/video";
 import { comfy, type ComfyMessage } from "./comfy";
 import { afterGenerate, beforeGenerate } from "./gpu";
@@ -33,7 +34,9 @@ const STAGES: Record<string, string> = {
   KSampler: "生成中",
   VAEDecode: "解碼",
   SaveImage: "儲存",
-  UNETLoader: "載入影片模型",
+  UNETLoader: "載入模型",
+  MiniMaxH3ImageConditioning: "理解 prompt",
+  ConditioningZeroOut: "理解 prompt",
   ImageScaleToTotalPixels: "準備首幀",
   MiniMaxH3ImageToVideo: "理解 prompt",
   VAEDecodeAudio: "產生聲音",
@@ -92,13 +95,15 @@ export function enqueue(toolId: ToolId, params: GenerateParams, origin?: PromptO
       const id = params.toolValues?.[f.key];
       if (typeof id !== "string" || !getImage(id)) throw new Error(`「${f.label}」需要選一張圖`);
     }
-  if (toolId === "qwen21-edit") {
+  if (isEditTool(toolId)) {
     const ids = [params.sourceImageId, ...(params.refImageIds ?? [])];
     if (!params.sourceImageId) throw new Error("修圖需要一張原圖");
     const missing = ids.find((id) => !id || !getImage(id));
     if (missing !== undefined) throw new Error(`找不到圖片 ${missing}`);
-    if (ids.length > 10) throw new Error("最多 10 張圖（原圖 + 9 張參考）");
+    const max = resolveTool(toolId).imageInput!.max;
+    if (ids.length > max) throw new Error(`最多 ${max} 張圖（原圖 + ${max - 1} 張參考）`);
   }
+  if (params.loras?.length && !resolveTool(toolId).loraSlot) throw new Error(`${resolveTool(toolId).name} 不支援 LoRA`);
   const job: Job = {
     id: nanoid(10),
     status: "queued",
@@ -170,9 +175,10 @@ async function run(job: Job) {
     } else {
       const region = await prepareRegion(job.params);
       const images = await uploadInputs(job.params, region?.image);
+      const text = region?.prompt ?? job.params.prompt;
       const values = {
         ...job.params,
-        prompt: region?.prompt ?? job.params.prompt,
+        prompt: job.tool === "h3-image-edit" ? h3EditPrompt(text) : text,
         resolution: editResolution(job.params),
         // The grown canvas has nothing worth keeping, so outpainting always re-draws fully.
         denoise: job.params.outpaint ? undefined : job.params.denoise,
@@ -180,7 +186,14 @@ async function run(job: Job) {
       prompt = buildPrompt(tool, values, images, job.params.loras);
       finishers.set(job, region?.finish);
     }
-    const target = job.tool === "minimax-h3-video" ? "minimax-video" : job.tool.startsWith("custom:") ? `custom:${tool.name}` : "qwen-image";
+    const target =
+      job.tool === "minimax-h3-video"
+        ? "minimax-video"
+        : job.tool.startsWith("custom:")
+          ? `custom:${tool.name}`
+          : tool.family === "minimax-h3-image"
+            ? "minimax-image"
+            : "qwen-image";
     if (comfy.resident && comfy.resident !== target) {
       update(job, { stage: "等待 ComfyUI 完成其他任務" });
       if (await comfy.hasQueuedWork()) throw new Error("ComfyUI 仍有其他任務，完成後請重試模型切換");

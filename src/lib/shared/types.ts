@@ -28,7 +28,17 @@ export interface Preset {
   updatedAt: number;
 }
 
+/** The image model behind generating and editing. */
+export type ImageModel = "qwen21" | "h3-image";
+
+export const IMAGE_MODELS: Record<ImageModel, { label: string; hint: string }> = {
+  qwen21: { label: "Qwen 2.1", hint: "Qwen Image 2.1：可調步數、CFG、LoRA、負面 prompt" },
+  "h3-image": { label: "H3 Image", hint: "MiniMax H3 Image：固定 6 步，4 MP 以上效果最好；不支援 LoRA 和負面 prompt" },
+};
+
 export interface GenerateParams {
+  /** Images only; absent = Qwen Image 2.1 (everything made before H3 Image was added). */
+  model?: ImageModel;
   prompt: string;
   negativePrompt: string;
   width: number;
@@ -131,7 +141,13 @@ export interface LoraUse {
   strength: number;
 }
 
-export type BuiltinToolId = "qwen21-t2i" | "qwen21-edit" | "minimax-h3-video";
+export type BuiltinToolId = "qwen21-t2i" | "qwen21-edit" | "h3-image-t2i" | "h3-image-edit" | "minimax-h3-video";
+/** The built-in tool that makes (or, with a source image, edits) an image with this model. */
+export const imageToolFor = (model: ImageModel | undefined, editing: boolean): BuiltinToolId =>
+  model === "h3-image" ? (editing ? "h3-image-edit" : "h3-image-t2i") : editing ? "qwen21-edit" : "qwen21-t2i";
+
+export const isEditTool = (tool: string) => tool === "qwen21-edit" || tool === "h3-image-edit";
+
 /** Built-in tools, or `custom:<id>` for an imported workflow. */
 export type ToolId = BuiltinToolId | `custom:${string}`;
 

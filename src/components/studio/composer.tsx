@@ -4,10 +4,11 @@ import { useRef, useState } from "react";
 import { Clapperboard, Dices, Image as ImageIcon, ImagePlus, Lock, Loader2, Plus, SlidersHorizontal, Square, Undo2, Upload, Wand2, X } from "lucide-react";
 import { imageUrl, streamLlm } from "@/lib/client/api";
 import { ASPECTS, CUSTOM_SIZE, MEGAPIXELS, QUALITIES, randomSeed, snapSize } from "@/lib/shared/sizes";
-import type { ImageRecord, PromptOrigin } from "@/lib/shared/types";
+import { IMAGE_MODELS, type ImageModel, type ImageRecord, type PromptOrigin } from "@/lib/shared/types";
 import { Button, Chip, IconButton, PresetSelect, inputCls } from "@/components/ui";
 import { useStudio } from "@/components/studio-provider";
-import { addRefs, editImageIds, imageSize, initialComposer, videoContext, MAX_REFS, purposeOf, setMode, videoDims, type ComposerState } from "./composer-state";
+import { addRefs, editImageIds, imageSize, initialComposer, videoContext, MAX_REFS, purposeOf, setMode, setModel, videoDims, type ComposerState } from "./composer-state";
+import { H3_STEPS } from "@/lib/tools/h3-image";
 import { framesFor, VIDEO_SPEEDS, videoEstimate } from "@/lib/tools/video";
 import { SamplerRows, VideoQualityChips, VideoStepRows } from "./sampler-fields";
 import { LoraPicker } from "./lora-picker";
@@ -49,6 +50,8 @@ export function Composer({
   const set = (patch: Partial<ComposerState>) => setState((s) => ({ ...s, ...patch }));
   const video = state.mode === "video";
   const editing = !video && !!state.edit;
+  // H3 Image is distilled: fixed steps and CFG, no LoRA, no negative prompt.
+  const h3 = !video && state.model === "h3-image";
   const o = state.edit?.outpaint;
   const { width, height } = video
     ? videoDims(state)
@@ -223,6 +226,22 @@ export function Composer({
             </button>
           ))}
         </div>
+        {!video && (
+          <div className="flex items-center rounded-lg bg-raised p-0.5" role="tablist" aria-label="圖片模型">
+            {(Object.keys(IMAGE_MODELS) as ImageModel[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => setState((s) => setModel(s, m))}
+                title={IMAGE_MODELS[m].hint}
+                className={`rounded-md px-2.5 py-1 text-xs transition ${
+                  state.model === m ? "bg-accent-strong text-white" : "text-muted hover:text-fg"
+                }`}
+              >
+                {IMAGE_MODELS[m].label}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex items-center gap-1 rounded-lg bg-raised p-0.5">
           {expanding ? (
             <Button variant="ghost" className="!py-1" onClick={() => abortRef.current?.abort()}>
@@ -296,7 +315,7 @@ export function Composer({
           </>
         ) : editing ? (
           <span className={`rounded-md px-2 py-1 text-xs ${region === "whole" ? "text-faint" : "bg-accent-strong/20 text-accent"}`}>
-            {region === "mask" ? "只改選取範圍" : region === "outpaint" ? "擴圖" : "整張修改 · 尺寸跟原圖一樣"}
+            {region === "mask" ? "只改選取範圍" : region === "outpaint" ? "擴圖" : h3 ? "整張修改" : "整張修改 · 尺寸跟原圖一樣"}
           </span>
         ) : (
           <>
@@ -329,7 +348,7 @@ export function Composer({
           </>
         )}
 
-        {!video && (
+        {!video && !h3 && (
           <div className="flex items-center">
             {QUALITIES.map((q) => (
               <Chip key={q.id} on={state.steps === q.steps} onClick={() => set({ steps: q.steps })}>
@@ -342,7 +361,7 @@ export function Composer({
         <IconButton label="進階參數與 LoRA" onClick={() => setAdvanced((v) => !v)} className={advanced ? "text-accent" : ""}>
           <SlidersHorizontal className="size-4" />
         </IconButton>
-        {state.loras.length > 0 && !advanced && !video && (
+        {state.loras.length > 0 && !advanced && !video && !h3 && (
           <button onClick={() => setAdvanced(true)} className="rounded-md bg-accent-strong/20 px-2 py-1 text-xs text-accent">
             LoRA ×{state.loras.length}
           </button>
@@ -358,7 +377,9 @@ export function Composer({
             {width}×{height}
             {video
               ? ` · 約 ${videoEstimate(state.video.seconds, state.video.megapixels, state.video.steps)} 秒`
-              : !quality && ` · ${state.steps} steps`}
+              : h3
+                ? ` · ${H3_STEPS} 步`
+                : !quality && ` · ${state.steps} steps`}
           </span>
           <div className="flex items-center rounded-lg border border-line text-xs">
             <button className="px-2 py-1 text-muted hover:text-fg" onClick={() => set({ count: Math.max(1, state.count - 1) })}>
@@ -387,7 +408,13 @@ export function Composer({
 
       {advanced && (
         <div className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 border-t md:gap-x-4 border-line pt-3 text-xs text-muted">
-          {!video && (
+          {h3 && (
+            <>
+              <label>模型</label>
+              <span className="text-faint">H3 Image 是蒸餾模型：固定 {H3_STEPS} 步、CFG 1，不支援 LoRA 和負面 prompt。</span>
+            </>
+          )}
+          {!video && !h3 && (
             <>
           <label>Steps</label>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -477,7 +504,7 @@ export function Composer({
               {state.seedLocked ? "固定 seed" : "每次隨機"}
             </Button>
           </div>
-          {!video && (
+          {!video && !h3 && (
             <>
               <label>LoRA</label>
               <LoraPicker value={state.loras} onChange={(loras) => set({ loras })} />

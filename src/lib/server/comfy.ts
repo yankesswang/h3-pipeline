@@ -23,7 +23,7 @@ class ComfyClient {
   readonly clientId = nanoid();
   readonly events = new EventEmitter();
   /**
-   * The model this app last ran in ComfyUI ("qwen-image", "minimax-video" or
+   * The model this app last ran in ComfyUI ("qwen-image", "minimax-image", "minimax-video" or
    * "custom:<tool name>"); null after a free. ComfyUI itself cannot say.
    */
   resident: string | null = null;

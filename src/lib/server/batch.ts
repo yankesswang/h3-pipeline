@@ -3,14 +3,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { nanoid } from "nanoid";
-import type { BatchRequest, FolderListing, Job } from "@/lib/shared/types";
+import { imageToolFor, type BatchRequest, type FolderListing, type Job } from "@/lib/shared/types";
 import { importUpload } from "./images";
 import { cancel, enqueue, listJobs } from "./queue";
 import { getImage } from "./repo";
 
 // Batch edit: the same instruction applied to every image in a folder (or a
 // gallery selection), like the ComfyUI "batch edit" workflow with its
-// LoadImagesFromPath node. Each image becomes its own qwen21-edit job, so
+// LoadImagesFromPath node. Each image becomes its own edit job (Qwen or H3, as the params say), so
 // results land in the gallery with the original as their parent.
 
 const IMAGE_EXT = /\.(png|jpe?g|webp)$/i;
@@ -80,7 +80,7 @@ export async function startBatch(req: BatchRequest): Promise<Job[]> {
   const id = nanoid(8);
   // One seed for the whole batch, so every image gets the same treatment.
   return sources.map((s, index) =>
-    enqueue("qwen21-edit", {
+    enqueue(imageToolFor(p.model, true), {
       ...p,
       sourceImageId: s.id,
       refImageIds: undefined,

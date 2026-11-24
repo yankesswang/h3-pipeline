@@ -75,7 +75,7 @@ export default function ToolsPage() {
                 <h2 className="font-medium text-muted">{t.name}</h2>
                 <span className="ml-auto rounded bg-raised px-1.5 py-0.5 text-[10px] text-faint">內建</span>
               </div>
-              <p className="text-xs text-faint">在「創作」頁使用：{t.id === "qwen21-edit" ? "修改、局部修改、擴圖" : "文字生圖"}</p>
+              <p className="text-xs text-faint">在「創作」頁使用：{t.id.endsWith("-edit") ? "修改、局部修改、擴圖" : t.id === "minimax-h3-video" ? "影片" : "文字生圖"}</p>
             </div>
           ))}
         </section>

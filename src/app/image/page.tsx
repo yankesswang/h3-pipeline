@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { Clapperboard, Download, ImagePlus, Loader2, Pencil, RotateCcw, Sparkles, Square, Type, Wand2 } from "lucide-react";
 import { api, imageUrl, streamLlm } from "@/lib/client/api";
 import { ASPECTS, MEGAPIXELS, QUALITIES, randomSeed, sizeFor, snapSize, type AspectId } from "@/lib/shared/sizes";
-import type { GenerateParams, ImageRecord, LoraUse, PromptOrigin } from "@/lib/shared/types";
+import { IMAGE_MODELS, type GenerateParams, type ImageModel, type ImageRecord, type LoraUse, type PromptOrigin } from "@/lib/shared/types";
+import { H3_STEPS } from "@/lib/tools/h3-image";
 import { MAX_REFS as MAX_EDIT_REFS } from "@/components/studio/composer-state";
 import { LoraPicker } from "@/components/studio/lora-picker";
 import { SamplerRows } from "@/components/studio/sampler-fields";
@@ -25,7 +26,7 @@ import {
   usePageJobs,
 } from "@/components/workflow";
 
-// A step-by-step page for Qwen Image, laid out like the video page: pick a
+// A step-by-step page for MiniMax H3 Image or Qwen Image 2.1, laid out like the video page: pick a
 // start (a new image from text, or changing an existing one), write the idea,
 // let the local LLM turn it into an English prompt, set size and quality, then generate. Results show on the right and
 // can be edited further or turned into a video.
@@ -38,6 +39,7 @@ const MAX_LLM_REFS = 4;
 const SAMPLER_DEFAULTS = { sampler: "euler", scheduler: "simple" };
 
 interface Form {
+  model: ImageModel;
   source: "text" | "edit";
   aspect: AspectId;
   megapixels: number;
@@ -61,9 +63,10 @@ interface Form {
 }
 
 const DEFAULTS: Form = {
+  model: "h3-image",
   source: "text",
   aspect: "1:1",
-  megapixels: 1,
+  megapixels: 4,
   customSize: null,
   idea: "",
   prompt: "",
@@ -107,7 +110,14 @@ export default function ImagePage() {
     /* eslint-disable react-hooks/set-state-in-effect */
     try {
       const saved = JSON.parse(localStorage.getItem(STORE) ?? "{}") as Partial<Form>;
-      setForm((f) => ({ ...f, ...saved, source: "text", seed: saved.seedLocked ? (saved.seed ?? f.seed) : f.seed }));
+      setForm((f) => ({
+        ...f,
+        ...saved,
+        // Saved before H3 Image existed: start on it, at its size.
+        ...(saved.model ? {} : { model: f.model, megapixels: f.megapixels }),
+        source: "text",
+        seed: saved.seedLocked ? (saved.seed ?? f.seed) : f.seed,
+      }));
     } catch {}
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
@@ -118,6 +128,8 @@ export default function ImagePage() {
   }, [form]);
 
   const editing = form.source === "edit";
+  // H3 Image is distilled: fixed steps and CFG, no LoRA, no negative prompt.
+  const h3 = form.model === "h3-image";
   const purpose = editing ? "edit" : "generate";
   const purposePresets = presets.filter((p) => p.purpose === purpose);
   const presetId = editing ? form.editPresetId : form.generatePresetId;
@@ -214,20 +226,24 @@ export default function ImagePage() {
     setSubmitting(true);
     const seed = form.seedLocked ? form.seed : randomSeed();
     if (!form.seedLocked) set({ seed });
-    const params: GenerateParams = {
-      prompt: form.prompt.trim(),
-      negativePrompt: form.negativePrompt,
-      width,
-      height,
-      steps: form.steps,
-      cfg: form.cfg,
-      seed,
-      sampler: form.sampler,
-      scheduler: form.scheduler,
-      ...(editing && source ? { sourceImageId: source.id, refImageIds: editRefs.map((r) => r.id) } : {}),
-      ...(editing && form.denoise < 1 ? { denoise: form.denoise } : {}),
-      ...(form.loras.length ? { loras: form.loras } : {}),
-    };
+    const images = editing && source ? { sourceImageId: source.id, refImageIds: editRefs.map((r) => r.id) } : {};
+    const params: GenerateParams = h3
+      ? { model: "h3-image", prompt: form.prompt.trim(), negativePrompt: "", width, height, steps: H3_STEPS, cfg: 1, seed, ...images }
+      : {
+          model: "qwen21",
+          prompt: form.prompt.trim(),
+          negativePrompt: form.negativePrompt,
+          width,
+          height,
+          steps: form.steps,
+          cfg: form.cfg,
+          seed,
+          sampler: form.sampler,
+          scheduler: form.scheduler,
+          ...images,
+          ...(editing && form.denoise < 1 ? { denoise: form.denoise } : {}),
+          ...(form.loras.length ? { loras: form.loras } : {}),
+        };
     try {
       track(await api.generate({ params, count: form.count, origin: origin?.idea ? origin : undefined }));
     } catch (e) {
@@ -245,13 +261,15 @@ export default function ImagePage() {
       Math.abs(m - (p.width * p.height) / 2 ** 20) < Math.abs(b - (p.width * p.height) / 2 ** 20) ? m : b,
     );
     const preset = sizeFor(aspect, megapixels);
+    const model = p.model ?? "qwen21";
     set({
+      model,
       prompt: p.prompt,
       idea: img.origin?.idea ?? "",
       aspect,
       megapixels,
       customSize: preset.width === p.width && preset.height === p.height ? null : { width: p.width, height: p.height },
-      steps: p.steps || DEFAULTS.steps,
+      steps: model === "h3-image" ? form.steps : p.steps || DEFAULTS.steps,
       cfg: p.cfg || 1,
       negativePrompt: p.negativePrompt ?? "",
       sampler: p.sampler ?? SAMPLER_DEFAULTS.sampler,
@@ -282,10 +300,18 @@ export default function ImagePage() {
       )}
       {/* Workflow */}
       <div className="flex w-full shrink-0 flex-col border-b border-line bg-panel md:w-[480px] md:border-r md:border-b-0">
-        <WorkflowHeader icon={Sparkles} title="圖片生成" subtitle="Qwen Image · 文字生圖，或修改一張圖" steps={steps} />
+        <WorkflowHeader icon={Sparkles} title="圖片生成" subtitle={`${IMAGE_MODELS[form.model].label} · 文字生圖，或修改一張圖`} steps={steps} />
 
         <div className="flex-1 space-y-3 p-3 md:overflow-y-auto md:p-4">
           <Step n={1} title="起點" hint="從文字生成新圖，或修改一張圖">
+            <div className="mb-3 flex flex-wrap items-center gap-0.5" title={IMAGE_MODELS[form.model].hint}>
+              <span className="mr-2 text-xs text-muted">模型</span>
+              {(Object.keys(IMAGE_MODELS) as ImageModel[]).map((m) => (
+                <Chip key={m} on={form.model === m} onClick={() => form.model !== m && set({ model: m, megapixels: m === "h3-image" ? 4 : 1 })}>
+                  {IMAGE_MODELS[m].label}
+                </Chip>
+              ))}
+            </div>
             <SourceTabs
               value={form.source}
               options={[
@@ -454,75 +480,84 @@ export default function ImagePage() {
 
           <Step n={4} title="設定">
             <div className="grid grid-cols-[56px_1fr] items-center gap-x-3 gap-y-2.5 text-xs text-muted">
-              <label>品質</label>
-              <div className="flex items-center gap-1">
-                {QUALITIES.map((q) => (
-                  <Chip key={q.id} on={form.steps === q.steps} onClick={() => set({ steps: q.steps })}>
-                    {q.label}
-                  </Chip>
-                ))}
-                <span className="ml-2 text-faint">{form.steps} steps</span>
-              </div>
-              <label>Steps</label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min={4}
-                  max={80}
-                  value={form.steps}
-                  onChange={(e) => set({ steps: Number(e.target.value) })}
-                  className="flex-1 accent-accent-strong"
-                />
-                <span className="w-24 text-faint">{quality ? `（${quality.label}）` : "官方建議 40–50"}</span>
-              </div>
-              <label>CFG</label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min={1}
-                  max={8}
-                  step={0.5}
-                  value={form.cfg}
-                  onChange={(e) => set({ cfg: Number(e.target.value) })}
-                  className="flex-1 accent-accent-strong"
-                />
-                <span className="w-24 text-fg tabular-nums">
-                  {form.cfg} <span className="text-faint">{form.cfg <= 1 ? "（建議）" : "（慢一倍）"}</span>
-                </span>
-              </div>
-              {form.cfg > 1 && (
+              {h3 ? (
                 <>
-                  <label>負面</label>
-                  <input
-                    value={form.negativePrompt}
-                    onChange={(e) => set({ negativePrompt: e.target.value })}
-                    placeholder="不想出現的東西"
-                    className={`${inputCls} !py-1 text-xs`}
-                  />
+                  <label>品質</label>
+                  <span className="text-faint">H3 Image 是蒸餾模型：固定 {H3_STEPS} 步、CFG 1，不支援 LoRA 和負面 prompt。</span>
                 </>
-              )}
-              {editing && (
+              ) : (
                 <>
-                  <label>變化量</label>
+                  <label>品質</label>
+                  <div className="flex items-center gap-1">
+                    {QUALITIES.map((q) => (
+                      <Chip key={q.id} on={form.steps === q.steps} onClick={() => set({ steps: q.steps })}>
+                        {q.label}
+                      </Chip>
+                    ))}
+                    <span className="ml-2 text-faint">{form.steps} steps</span>
+                  </div>
+                  <label>Steps</label>
                   <div className="flex items-center gap-3">
                     <input
                       type="range"
-                      min={0.3}
-                      max={1}
-                      step={0.05}
-                      value={form.denoise}
-                      onChange={(e) => set({ denoise: Number(e.target.value) })}
+                      min={4}
+                      max={80}
+                      value={form.steps}
+                      onChange={(e) => set({ steps: Number(e.target.value) })}
+                      className="flex-1 accent-accent-strong"
+                    />
+                    <span className="w-24 text-faint">{quality ? `（${quality.label}）` : "官方建議 40–50"}</span>
+                  </div>
+                  <label>CFG</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min={1}
+                      max={8}
+                      step={0.5}
+                      value={form.cfg}
+                      onChange={(e) => set({ cfg: Number(e.target.value) })}
                       className="flex-1 accent-accent-strong"
                     />
                     <span className="w-24 text-fg tabular-nums">
-                      {form.denoise.toFixed(2)} <span className="text-faint">{form.denoise < 1 ? "保留原圖結構" : ""}</span>
+                      {form.cfg} <span className="text-faint">{form.cfg <= 1 ? "（建議）" : "（慢一倍）"}</span>
                     </span>
                   </div>
+                  {form.cfg > 1 && (
+                    <>
+                      <label>負面</label>
+                      <input
+                        value={form.negativePrompt}
+                        onChange={(e) => set({ negativePrompt: e.target.value })}
+                        placeholder="不想出現的東西"
+                        className={`${inputCls} !py-1 text-xs`}
+                      />
+                    </>
+                  )}
+                  {editing && (
+                    <>
+                      <label>變化量</label>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="range"
+                          min={0.3}
+                          max={1}
+                          step={0.05}
+                          value={form.denoise}
+                          onChange={(e) => set({ denoise: Number(e.target.value) })}
+                          className="flex-1 accent-accent-strong"
+                        />
+                        <span className="w-24 text-fg tabular-nums">
+                          {form.denoise.toFixed(2)} <span className="text-faint">{form.denoise < 1 ? "保留原圖結構" : ""}</span>
+                        </span>
+                      </div>
+                    </>
+                  )}
+                  <SamplerRows sampler={form.sampler} scheduler={form.scheduler} defaults={SAMPLER_DEFAULTS} hint="官方：euler + simple" onChange={set} />
+                  <label>LoRA</label>
+                  <LoraPicker value={form.loras} onChange={(loras) => set({ loras })} />
                 </>
               )}
-              <SamplerRows sampler={form.sampler} scheduler={form.scheduler} defaults={SAMPLER_DEFAULTS} hint="官方：euler + simple" onChange={set} />
-              <label>LoRA</label>
-              <LoraPicker value={form.loras} onChange={(loras) => set({ loras })} />
               <SeedCountRows seed={form.seed} seedLocked={form.seedLocked} count={form.count} unit="張" onChange={set} />
             </div>
           </Step>
@@ -536,7 +571,7 @@ export default function ImagePage() {
               <span className="text-right text-xs leading-tight text-faint tabular-nums">
                 {editing && !source ? "跟著原圖" : `${width}×${height}`}
                 <br />
-                {form.count} 張 · {form.steps} steps
+                {form.count} 張 · {h3 ? `${H3_STEPS} 步` : `${form.steps} steps`}
               </span>
             </div>
             {!canRun && !busy && (
